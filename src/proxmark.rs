@@ -1,30 +1,32 @@
 use bincode;
 use bitflags::bitflags;
 use core::mem;
+use log::{debug, trace, warn};
 use serde::{Deserialize, Serialize};
 use serialport;
-use std::time::Duration;
 use std::str;
+use std::time::Duration;
 
-static PM3_CMD_MAX_DATA_SIZE: usize = 512;
-static PM3_CMD_MAX_FRAME_SIZE: usize = 544;
-static PM3_BAUD: u32 = 115_200;
-static SUPPORTED_CAPABILITIES_VERSION: u8 = 6;
+const PM3_CMD_MAX_DATA_SIZE: usize = 512;
+const PM3_CMD_MAX_FRAME_SIZE: usize = 544;
+const PM3_BAUD: u32 = 115_200;
+const SUPPORTED_CAPABILITIES_VERSION: u8 = 6;
 // TODO: https://github.com/RfidResearchGroup/proxmark3/blob/e4430037336b86f0aa7a08d23b67efcab662c829/include/pm3_cmd.h#L877
-pub static STATUS_SUCCESS: i8 = 0;
+pub const STATUS_SUCCESS: i8 = 0;
+pub const STATUS_EUNDEF: i8 = -1;
 // more at: https://github.com/RfidResearchGroup/proxmark3/blob/e4430037336b86f0aa7a08d23b67efcab662c829/include/pm3_cmd.h#L419
-pub static CMD_DEBUG_PRINT_STRING: u16 = 0x0100;
-pub static CMD_PING: u16 = 0x0109;
-pub static CMD_CAPABILITIES: u16 = 0x0112;
-pub static CMD_QUIT_SESSION: u16 = 0x0113;
-pub static CMD_WTX: u16 = 0x0116; // Wait time extension
-pub static CMD_ACK: u16 = 0x00ff;
-pub static CMD_HF_DROPFIELD: u16 = 0x0430;
+pub const CMD_DEBUG_PRINT_STRING: u16 = 0x0100;
+pub const CMD_PING: u16 = 0x0109;
+pub const CMD_CAPABILITIES: u16 = 0x0112;
+pub const CMD_QUIT_SESSION: u16 = 0x0113;
+pub const CMD_WTX: u16 = 0x0116; // Wait time extension
+pub const CMD_ACK: u16 = 0x00ff;
+pub const CMD_HF_DROPFIELD: u16 = 0x0430;
 pub const CMD_HF_ISO14443A_READER: u16 = 0x0385;
-static COMMANDNG_PREAMBLE_MAGIC: u32 = 0x61334d50; // PM3a
-static RESPONSENG_PREAMBLE_MAGIC: u32 = 0x62334d50; // PM3b
-static COMMANDNG_POSTAMBLE_MAGIC: u16 = 0x3361; // a3
-static RESPONSENG_POSTAMBLE_MAGIC: u16 = 0x3362; // b3
+const COMMANDNG_PREAMBLE_MAGIC: u32 = 0x61334d50; // PM3a
+const RESPONSENG_PREAMBLE_MAGIC: u32 = 0x62334d50; // PM3b
+const COMMANDNG_POSTAMBLE_MAGIC: u16 = 0x3361; // a3
+const RESPONSENG_POSTAMBLE_MAGIC: u16 = 0x3362; // b3
 
 bitflags! {
     #[derive(Debug)]
@@ -90,6 +92,22 @@ pub struct PM3PacketResponseNG {
     pub data: Vec<u8>,
 }
 
+impl PM3PacketResponseNG {
+    pub fn empty() -> PM3PacketResponseNG {
+        return PM3PacketResponseNG {
+            arg0: 0,
+            arg1: 0,
+            arg2: 0,
+            cmd: 0,
+            data: vec![],
+            length: 0,
+            ng: false,
+            reason: 0,
+            status: STATUS_EUNDEF,
+        };
+    }
+}
+
 pub fn connect(path: &str) -> Box<dyn serialport::SerialPort> {
     // connect to the proxmark
     let mut port = open_serial_comms(&path);
@@ -143,7 +161,7 @@ pub fn send_and_get_command(
     let response = get_response(port, cmd);
 
     if response.cmd == CMD_DEBUG_PRINT_STRING {
-        println!("{}", str::from_utf8(&response.data).unwrap());
+        warn!("{}", str::from_utf8(&response.data).unwrap());
     }
 
     let expected_command = if ng { cmd } else { CMD_ACK };
@@ -163,12 +181,12 @@ pub fn send_command(
         length_and_ng: merge_len_and_ng(data.len() as u16, ng),
         magic: COMMANDNG_PREAMBLE_MAGIC,
     };
-    println!("> command: {:x?} data: {:x?}", command, data);
+    debug!("> command: {:x?} data: {:x?}", command, data);
     let partly_encoded_command = bincode::serialize(&command).unwrap();
     let postamble_vec = COMMANDNG_POSTAMBLE_MAGIC.to_le_bytes().to_vec();
     let serial_buf = vec![partly_encoded_command, data.clone(), postamble_vec].concat();
 
-    // println!("> command (b): {:x?}", serial_buf);
+    trace!("> command (b): {:x?}", serial_buf);
 
     clear_input_buffer(port);
     port.write(serial_buf.as_slice()).expect("Write failed!");
@@ -201,13 +219,13 @@ fn get_response(port: &mut Box<dyn serialport::SerialPort>, sent_cmd: u16) -> PM
             expected_length = data_offset + (data_length as usize) + 2;
         }
         total_read += read_size;
-        // println!("{:?}", &total_read);
+        trace!("Total read: {:?}", &total_read);
     }
-    // println!(
-    //     "< response (b, {:?}): {:x?}",
-    //     total_read,
-    //     &serial_buf[0..total_read]
-    // );
+    trace!(
+        "< response (b, {:?}): {:x?}",
+        total_read,
+        &serial_buf[0..total_read]
+    );
 
     // parse arg0/1/2 or not based on if we're on a NG command
     let response = if ng {
@@ -216,17 +234,21 @@ fn get_response(port: &mut Box<dyn serialport::SerialPort>, sent_cmd: u16) -> PM
         map_mix_to_packet_response(serial_buf, data_length, sent_cmd)
     };
 
-    println!("< response: {:x?}", response);
+    debug!("< response: {:x?}", response);
 
     return response;
 }
 
-fn map_ng_to_packet_response(serial_buf: Vec<u8>, data_length: u16, sent_cmd: u16) -> PM3PacketResponseNG {
+fn map_ng_to_packet_response(
+    serial_buf: Vec<u8>,
+    data_length: u16,
+    _sent_cmd: u16,
+) -> PM3PacketResponseNG {
     let data_offset = mem::size_of::<PM3PacketResponseNGInternal>();
     let partial_response: PM3PacketResponseNGInternal = bincode::deserialize(&serial_buf).unwrap();
     assert!(partial_response.magic == RESPONSENG_PREAMBLE_MAGIC);
 
-    // println!("< partial_response: {:x?}", partial_response);
+    trace!("< partial_response: {:x?}", partial_response);
 
     let data_end = data_offset + data_length as usize;
     let data = serial_buf[data_offset..data_end].to_vec();
@@ -246,19 +268,24 @@ fn map_ng_to_packet_response(serial_buf: Vec<u8>, data_length: u16, sent_cmd: u1
     };
 }
 
-fn map_mix_to_packet_response(serial_buf: Vec<u8>, data_length: u16, sent_cmd: u16) -> PM3PacketResponseNG {
+fn map_mix_to_packet_response(
+    serial_buf: Vec<u8>,
+    data_length: u16,
+    sent_cmd: u16,
+) -> PM3PacketResponseNG {
     let data_offset = mem::size_of::<PM3PacketResponseMIXInternal>();
     let partial_response: PM3PacketResponseMIXInternal = bincode::deserialize(&serial_buf).unwrap();
     assert!(partial_response.magic == RESPONSENG_PREAMBLE_MAGIC);
 
-    // println!("< partial_response: {:x?}", partial_response);
+    trace!("< partial_response: {:x?}", partial_response);
 
+    // - 24 here as 3x u64s for the args
     let actual_data_length: u16 = match sent_cmd {
         CMD_HF_ISO14443A_READER => partial_response.arg0 as u16,
         _ => data_length - 24,
     };
 
-    // -24 here as 3x u64s for the args
+    // - 24 here as 3x u64s for the args
     let data_end = data_offset + data_length as usize - 24 as usize;
     let actual_data_end = data_offset + actual_data_length as usize;
     let data = serial_buf[data_offset..actual_data_end].to_vec();
@@ -329,7 +356,7 @@ pub fn pm3_hf_drop_field(port: &mut Box<dyn serialport::SerialPort>) {
     send_command(port, CMD_HF_DROPFIELD, &vec![], true);
 }
 
-pub fn pm3_14a_select(port: &mut Box<dyn serialport::SerialPort>, disconnect: bool) {
+pub fn pm3_14a_select(port: &mut Box<dyn serialport::SerialPort>, disconnect: bool) -> bool {
     let flags = ISO14ACommand::CONNECT | ISO14ACommand::NO_DISCONNECT;
     let response = pm3_exchange_14a_command(port, &vec![], flags.bits());
 
@@ -340,6 +367,7 @@ pub fn pm3_14a_select(port: &mut Box<dyn serialport::SerialPort>, disconnect: bo
     // 0: couldn't read, 1: OK, with ATS, 2: OK, no ATS, 3: proprietary Anticollision
     // TODO: no ATS is not currently implemented.
     assert!(response.arg0 == 1);
+    return response.arg0 == 1;
 }
 
 pub fn pm3_exchange_apdu_14a(

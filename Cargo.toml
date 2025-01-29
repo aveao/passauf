@@ -4,8 +4,25 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bincode = "1.3.3"
-serialport = "4.7.0"
-serde = { version = "1.0", features = ["derive"] }
-bitflags = "2.8.0"
-asn1 = "0.20.0"
+bincode = { version = "1.3", optional = true }
+serialport = { version = "4.7", optional = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+bitflags = { version = "2.8", optional = true }
+asn1 = "0.20"
+# compile out debug and trace calls on release builds
+log = { version= "0.4", features = ["release_max_level_info"] }
+simplelog = { version = "0.12", features = ["paris"] }
+strum = { version = "0.26", features = ["derive"] }
+phf = { version = "0.11", features = ["macros"] }
+
+[features]
+# to make development easier, all features are on by default. this will change later.
+default = ["proxmark", "pcsc", "cli", "pace"]
+# Proxmark support
+proxmark = ["dep:serialport", "dep:serde", "serde/derive", "dep:bincode", "dep:bitflags"]
+# PCSC support. Empty for now.
+pcsc = []
+# cli tool inclusion
+cli = []
+# PACE support. Empty for now but we'll surely need some libs for it, right?
+pace = []
