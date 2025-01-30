@@ -1,28 +1,13 @@
 mod icao9303;
+mod types;
 mod iso7816;
 #[cfg(feature = "proxmark")]
 mod proxmark;
 use std::cmp::min;
 
-use asn1;
 use iso7816::StatusCode;
 use log::{debug, info, warn};
 use simplelog::{CombinedLogger, TermLogger};
-
-// const  = asn1::oid!(1, 2, 3);
-
-// #[derive(asn1::Asn1Read, asn1::Asn1Write)]
-// struct MySequence {
-//     content_type: asn1::DefinedByMarker<asn1::ObjectIdentifier>,
-//     #[defined_by(content_type)]
-//     content: Content,
-// }
-
-// #[derive(asn1::Asn1DefinedByRead, asn1::Asn1DefinedByWrite)]
-// enum Content {
-//     #[defined_by([1,2,3,4])]
-//     SomeVariant(i32),
-// }
 
 fn exchange_apdu(
     port: &mut Box<dyn serialport::SerialPort>,
@@ -34,7 +19,7 @@ fn exchange_apdu(
     while !done_exchanging {
         debug!("> APDU: {:x?}", apdu);
         let apdu_bytes = apdu.serialize();
-        response = proxmark::pm3_exchange_apdu_14a(port, &apdu_bytes, false);
+        response = proxmark::exchange_apdu_14a(port, &apdu_bytes, false);
         let status_code_bytes = iso7816::get_status_code_bytes(&response.data);
 
         // ISO/IEC 7816-4 says:
@@ -101,11 +86,11 @@ fn select_and_read_file(
         // We must, therefore, read the ASN.1 header to get the size.
         // I'd love to replace this with a better solution if I find one.
         if data.is_empty() && status_code_bytes[0] == 0x90 {
-            // TODO: this does not account for non-ASN1 files.
+            // TODO: this does not account for non-ASN1 files. We can use .is_asn1.
             let (field_len, asn1_len) = asn1_parse_len(response.data[1..].to_vec());
-            // TODO: maybe this is higher than u16?
-            // we should account for it even tho its unlikely.
-            // offset by 1 as we're skipping the initial tag
+            // TODO: rethink this u16.
+            // We should account for u32 even tho its unlikely.
+            // offset by 1 as we're skipping the initial tag.
             total_len = (1u32 + field_len as u32 + asn1_len) as u16;
         }
 
@@ -156,7 +141,7 @@ fn main() {
     .unwrap();
 
     // Select a nearby eMRTD
-    proxmark::pm3_14a_select(&mut port, false);
+    proxmark::select_14a(&mut port, false);
 
     let mut pace_available = false;
 
@@ -189,6 +174,10 @@ fn main() {
     let (_, status_code) = exchange_apdu(&mut port, &mut apdu);
     assert!(status_code == StatusCode::Ok as u16);
 
-    proxmark::pm3_quit_session(&mut port);
+    // auth goes here
+
+    // read all the rest of files
+
+    proxmark::quit_session(&mut port);
     drop(port);
 }

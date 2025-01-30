@@ -43,3 +43,14 @@ However, official/diplomatic travel etc do [use their own passport types](https:
     - UK citizens can however travel to Ireland without a passport by carrying other proof of UK citizenship (birth certificate?): https://www.gov.uk/foreign-travel-advice/ireland/entry-requirements
     - Similarly, [Republic of Ireland citizens can travel to UK with only an ID](https://www.citizensinformation.ie/en/government-in-ireland/ireland-and-the-uk/common-travel-area-between-ireland-and-the-uk/), though the official guidance notes that some carriers refuse anything but a passport.
     - [You can travel from Crown Dependencies (Jersey, Guernsey, Isle of Man) to UK without a passport](https://www.gov.uk/guidance/travelling-between-the-uk-and-ireland-isle-of-man-guernsey-or-jersey#crown-dependencies), but instead any form of official identity document, including passport cards, driver's licenses and armed forces IDs.
+
+## Known applet IDs on the eMRTDs
+
+- eMRTD LDS1: 0xA0000002471001 (ICAO 9303, 8th edition, p10)
+- eMRTD LDS2 Travel Records: 0xA0000002472001 (ICAO 9303, 8th edition, p10)
+- eMRTD LDS2 Visa Records: 0xA0000002472002 (ICAO 9303, 8th edition, p10)
+- eMRTD LDS2 Additional Biometrics: 0xA0000002472003 (ICAO 9303, 8th edition, p10)
+- Germany eID: 0xE80704007F0007030 (BSI TR-03127)
+- Germany eSign: 0xA000000167455349474E (BSI TR-03127, unused)
+
+LDS2 isn't widely supported to my knowledge.
