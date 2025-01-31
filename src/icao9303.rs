@@ -1,6 +1,14 @@
+use crate::types;
+use block_padding;
+use cbc::cipher::{BlockCipherEncrypt, KeyIvInit};
 use log::warn;
 use phf::phf_map;
-use crate::types;
+use rand::Rng;
+use retail_mac::{digest::KeyInit, Mac, RetailMac};
+use sha1::{Digest, Sha1};
+
+type RetailMacDes = RetailMac<des::Des>;
+type TDesCbcEnc = cbc::Encryptor<des::TdesEde2>;
 
 #[derive(Debug)]
 pub struct DataGroup {
@@ -17,6 +25,106 @@ pub struct DataGroup {
     pub in_lds1: bool,
     pub is_asn1: bool,
     pub parser: fn(Vec<u8>),
+}
+
+/// Calculates MRZ check digits according to ICAO 9303 p3
+///
+/// Can be used for document number, DOB, Expiry and MRZ text
+/// Accepts a String of A-Z 0-9 and <
+pub fn calculate_check_digit(text: &String) -> u8 {
+    let mrz_weights = [7, 3, 1];
+    // MRZ isn't supposed to have lowercase characters, but user input is user input.
+    let uppercase_text = text.to_uppercase();
+    let mut check_digit: u8 = 0;
+
+    for (i, character) in uppercase_text.as_bytes().into_iter().enumerate() {
+        let char_value = match character {
+            b'A'..=b'Z' => character - 55, // A = 10, Z = 35
+            b'0'..=b'9' => character - 48, // turn ASCII numbers into actual numbers
+            b'<' => 0,
+            _ => 0, // we shouldn't get any other chars ideally
+        };
+        // The check digit is supposed to be mod10 at the end.
+        // As long as we're adding positive integers to it (we control them),
+        // mod10 on each iteration should lead to the same result
+        // and let us stay u8 while accepting arbitrary length inputs.
+        check_digit += char_value * mrz_weights[i % 3];
+        check_digit %= 10;
+    }
+    return check_digit;
+}
+
+/// Appends MRZ check digits to a given String
+///
+/// Can be used for document number, DOB, Expiry and MRZ text
+/// Accepts a String of A-Z 0-9 and <
+pub fn append_check_digit(text: &String) -> String {
+    let check_digit = calculate_check_digit(text);
+    let result = text.to_owned() + &check_digit.to_string();
+    return result;
+}
+
+/// Does key derivation based on ICAO 9303 p11 for SHA1
+///
+/// For BAC, this is always used.
+/// For PACE, this is only used for 128-bit AES keys.
+pub fn kdf_sha1(shared_secret: Vec<u8>, counter: u32) -> Vec<u8> {
+    let base_secret = vec![shared_secret, counter.to_be_bytes().to_vec()].concat();
+    let mut sha1_hasher = Sha1::new();
+    sha1_hasher.update(base_secret.as_slice());
+    // Trim to first 16 bytes.
+    let keydata = sha1_hasher.finalize_reset()[0..=16].to_vec();
+    // TODO: adjust parity bits
+    return keydata;
+}
+
+pub fn calculate_bac(
+    rnd_ic: Vec<u8>,
+    document_number: String,
+    date_of_birth: String,
+    date_of_expiry: String,
+) {
+    let mut sha1_hasher = Sha1::new();
+
+    // Generate RND.IFD
+    let mut rnd_ifd = [0u8; 8];
+    rand::rng().fill(&mut rnd_ifd[..]);
+
+    // Generate keying material K.IFD
+    let mut k_ifd = [0u8; 16];
+    rand::rng().fill(&mut k_ifd[..]);
+
+    // Concatinate RND.IC, RND.IFD and K.IFD into S
+    let shared_secret = vec![rnd_ic.as_slice(), &rnd_ifd, &k_ifd].concat();
+
+    // Concatinate MRZ with added check digits for key formation.
+    let kmrz = vec![
+        append_check_digit(&document_number).into_bytes(),
+        append_check_digit(&date_of_birth).into_bytes(),
+        append_check_digit(&date_of_expiry).into_bytes(),
+    ]
+    .concat();
+
+    // Calculate the seed for the key
+    sha1_hasher.update(kmrz.as_slice());
+    let kseed = sha1_hasher.finalize_reset();
+
+    // Derive keys K.enc and K.mac
+    let kenc = kdf_sha1(kseed.to_vec(), 1);
+    let kmac = kdf_sha1(kseed.to_vec(), 2);
+
+    // Calculate E.IFD = E(KEnc, S)
+    let iv = [0x00; 8];
+    // ICAO 9303 calls for ISO 9797-1's padding 2,
+    // but block_padding's Iso7816 padding is identical to it.
+    let e_ifd = TDesCbcEnc::new(kenc.into(), &iv.into())
+        .encrypt_padded_vec::<block_padding::Iso7816>(&shared_secret);
+
+    // uint8_t m_ifd[8] = { 0x00 };
+    // retail_mac(kmac, e_ifd, 32, m_ifd);
+
+    // Calculate M.IFD = MAC(K.MAC, E.IFD)
+    let mut mac = RetailMacDes::new_from_slice(kmac.as_slice()).unwrap();
 }
 
 fn generic_parser(data: Vec<u8>) {
@@ -36,14 +144,14 @@ fn cardaccess_parser(data: Vec<u8>) {
     // for security_info in cardaccess_data.security_infos {
     //     warn!("Parsed of file: {:x?}", security_info);
     // }
- //    let parsed_set = parse_der(&data).unwrap().1;
- //    warn!("DER parsed of file: {:x?}", parsed_set);
- //    assert!(parsed_set.header.tag() == der_parser::ber::Tag::Set);
- //    for object in parsed_set.content.as_set().unwrap() {
- // warn!("obj: {:x?}", object);
- // // check that they're all tag 10 (Sequence)
- // //
- //    }
+    //    let parsed_set = parse_der(&data).unwrap().1;
+    //    warn!("DER parsed of file: {:x?}", parsed_set);
+    //    assert!(parsed_set.header.tag() == der_parser::ber::Tag::Set);
+    //    for object in parsed_set.content.as_set().unwrap() {
+    // warn!("obj: {:x?}", object);
+    // // check that they're all tag 10 (Sequence)
+    // //
+    //    }
 }
 
 pub static AID_MRTD_LDS1: [u8; 7] = [0xA0, 0x00, 0x00, 0x02, 0x47, 0x10, 0x01];

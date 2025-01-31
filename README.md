@@ -18,9 +18,10 @@ Accessing an eMRTD works like so:
     - We parse this file using ASN.1.
 - If it's not available, we attempt BAC, else we attempt PACE.
     - This requires us to know either all of document's expiry, date of birth and document number, or in case of PACE, alternatively the CAN¹.
-    - This is a diffie hellman exchange, followed by session encryption.
-    - BAC only supports one form of DH and encryption, while PACE is all about letting documents pick from a list, TODO say what BAC has.
-- Assuming authentication succeeds, we read the rest of the files we can access, parse them and verify their checksums.
+    - For BAC, this is a "three-pass challenge-response protocol according to [ISO/IEC 11770-2] Key Establishment Mechanism 6 using 3DES [FIPS 46-3] as block cipher."
+    - PACE is designed to be more secure, uses asymmetric crypto and lets documents support a number of algorithms. This makes it take more work to support it.
+    - According to ICAO 9303 p11, a document can be BAC-only, BAC and PACE, and PACE-only. I have one of each to test with.
+- Assuming authentication succeeds, we establish secure communication and read the rest of the files we can access, parse them and verify their checksums.
     - After the authentication stage, all communications are encrypted.
     - Depending on user's requests, we may display them or dump them to a file.
 - Later: Certificate verification for the document.

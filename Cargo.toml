@@ -14,6 +14,13 @@ simplelog = { version = "0.12", features = ["paris"] }
 strum = { version = "0.26", features = ["derive"] }
 phf = { version = "0.11", features = ["macros"] }
 asn1 = "0.20.0"
+rand = "0.9.0"
+# this is pending cipher/digest release
+retail-mac = "0.1.0"
+block-padding = { version = "0.4.0-rc.2", features = [] }
+sha1 = "0.11.0-pre.4"
+des = "0.9.0-pre.2"
+cbc = { version = "0.2.0-pre.2", features = ["alloc"] }
 
 [features]
 # to make development easier, all features are on by default. this will change later.
@@ -26,3 +33,6 @@ pcsc = []
 cli = []
 # PACE support. Empty for now but we'll surely need some libs for it, right?
 pace = []
+
+[patch.crates-io]
+retail-mac = { git = 'https://github.com/RustCrypto/MACs.git' }

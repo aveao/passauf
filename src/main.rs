@@ -1,17 +1,17 @@
 mod icao9303;
-mod types;
 mod iso7816;
 #[cfg(feature = "proxmark")]
 mod proxmark;
-use std::cmp::min;
-
+mod types;
 use iso7816::StatusCode;
 use log::{debug, info, warn};
 use simplelog::{CombinedLogger, TermLogger};
+use std::cmp::min;
 
 fn exchange_apdu(
     port: &mut Box<dyn serialport::SerialPort>,
     apdu: &mut iso7816::ApduCommand,
+    assert_on_status: bool,
 ) -> (proxmark::PM3PacketResponseNG, u16) {
     let mut done_exchanging = false;
     // initializing with an empty response here so that compiler doesn't complain
@@ -40,12 +40,18 @@ fn exchange_apdu(
     // TODO: validate hash
     let status_code = iso7816::get_status_code(&response.data);
 
+    if assert_on_status {
+        // Intentionally not checking 61 here.
+        // One shouldn't use assert_on_status if you handle 61.
+        assert!(status_code == StatusCode::Ok as u16);
+    }
+
     return (response, status_code);
 }
 
 fn asn1_parse_len(data: Vec<u8>) -> (u8, u32) {
     let result: (u8, u32) = match data[0] {
-        0..0x80 => (1, data[0].into()),
+        0..=0x7f => (1, data[0].into()),
         0x80 => (1, 0u32), // TODO: indefinite amount
         0x81 => (2, data[1].into()),
         0x82 => (3, u32::from_be_bytes([0, 0, data[1], data[2]])),
@@ -64,7 +70,7 @@ fn select_and_read_file(
 
     info!("Selecting {} ({})", filename, dg_info.description);
     let mut apdu = iso7816::apdu_select_file_by_ef(dg_info.file_id);
-    let (_, status_code) = exchange_apdu(port, &mut apdu);
+    let (_, status_code) = exchange_apdu(port, &mut apdu, false);
 
     if status_code != StatusCode::Ok as u16 {
         warn!("{} not found (this is probably fine).", filename);
@@ -77,7 +83,7 @@ fn select_and_read_file(
     let mut total_len: u16 = 0;
     while bytes_to_read > 0 {
         let mut apdu = iso7816::apdu_read_binary(data.len() as u16, bytes_to_read);
-        let (response, status_code) = exchange_apdu(port, &mut apdu);
+        let (response, status_code) = exchange_apdu(port, &mut apdu, false);
         let status_code_bytes = status_code.to_be_bytes();
         // - 4 bytes for status code and and hash
         let read_byte_count = response.data.len() - 4;
@@ -128,6 +134,28 @@ fn select_and_read_file(
     return if data.is_empty() { None } else { Some(data) };
 }
 
+fn bac(
+    port: &mut Box<dyn serialport::SerialPort>,
+    document_number: String,
+    date_of_birth: String,
+    date_of_expiry: String,
+) {
+    type TDesCbcEnc = cbc::Encryptor<des::TdesEde2>;
+    info!("Starting Basic Access Control");
+
+    // Get RND.IC by calling GET_CHALLENGE.
+    let mut apdu = iso7816::apdu_get_challenge();
+    let (response, _) = exchange_apdu(port, &mut apdu, true);
+    let rnd_ic = &response.data[0..=8];
+
+    icao9303::calculate_bac(
+        rnd_ic.to_vec(),
+        document_number,
+        date_of_birth,
+        date_of_expiry,
+    );
+}
+
 fn main() {
     let log_level = simplelog::LevelFilter::Info;
     // TODO: make the path adjustable
@@ -171,8 +199,7 @@ fn main() {
 
     info!("Selecting eMRTD LDS1 applet");
     let mut apdu = iso7816::apdu_select_file_by_name(icao9303::AID_MRTD_LDS1.to_vec());
-    let (_, status_code) = exchange_apdu(&mut port, &mut apdu);
-    assert!(status_code == StatusCode::Ok as u16);
+    let (_, status_code) = exchange_apdu(&mut port, &mut apdu, true);
 
     // auth goes here
 
