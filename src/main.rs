@@ -1,3 +1,4 @@
+mod helpers;
 mod icao9303;
 mod iso7816;
 #[cfg(feature = "proxmark")]
@@ -21,7 +22,7 @@ fn exchange_apdu(
     while !done_exchanging {
         debug!("> APDU: {:x?}", apdu);
         let apdu_bytes = apdu.serialize();
-        response = proxmark::exchange_apdu_14a(port, &apdu_bytes, false);
+        response = proxmark::exchange_apdu_14a(port, &apdu_bytes, false).unwrap();
         let status_code_bytes = iso7816::get_status_code_bytes(&response.data);
 
         // ISO/IEC 7816-4 says:
@@ -49,19 +50,6 @@ fn exchange_apdu(
     }
 
     return (response, status_code);
-}
-
-fn asn1_parse_len(data: Vec<u8>) -> (u8, u32) {
-    let result: (u8, u32) = match data[0] {
-        0..=0x7f => (1, data[0].into()),
-        0x80 => (1, 0u32), // TODO: indefinite amount
-        0x81 => (2, data[1].into()),
-        0x82 => (3, u32::from_be_bytes([0, 0, data[1], data[2]])),
-        0x83 => (4, u32::from_be_bytes([0, data[1], data[2], data[3]])),
-        0x84 => (5, u32::from_be_bytes([data[1], data[2], data[3], data[4]])),
-        0x84.. => (0, 0u32),
-    };
-    return result;
 }
 
 fn select_and_read_file(
@@ -95,7 +83,7 @@ fn select_and_read_file(
         // I'd love to replace this with a better solution if I find one.
         if data.is_empty() && status_code_bytes[0] == 0x90 {
             // TODO: this does not account for non-ASN1 files. We can use .is_asn1.
-            let (field_len, asn1_len) = asn1_parse_len(response.data[1..].to_vec());
+            let (field_len, asn1_len) = helpers::asn1_parse_len(response.data[1..].to_vec());
             // TODO: rethink this u16.
             // We should account for u32 even tho its unlikely.
             // offset by 1 as we're skipping the initial tag.
@@ -192,7 +180,7 @@ fn main() {
 
     let log_level = simplelog::LevelFilter::Info;
     // TODO: make the path adjustable
-    let mut port = proxmark::connect(&args[1]);
+    let mut port = proxmark::connect(&args[1]).unwrap();
     CombinedLogger::init(vec![TermLogger::new(
         log_level,
         simplelog::Config::default(),
@@ -202,7 +190,7 @@ fn main() {
     .unwrap();
 
     // Select a nearby eMRTD
-    proxmark::select_14a(&mut port, false);
+    let _ = proxmark::select_14a(&mut port, false).unwrap();
 
     let mut pace_available = false;
 
@@ -239,6 +227,6 @@ fn main() {
 
     // read all the rest of files
 
-    proxmark::quit_session(&mut port);
+    let _ = proxmark::quit_session(&mut port);
     drop(port);
 }

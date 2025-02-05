@@ -18,18 +18,21 @@ const RESPONSENG_PREAMBLE_MAGIC: u32 = 0x62334d50; // PM3b
 const COMMANDNG_POSTAMBLE_MAGIC: u16 = 0x3361; // a3
 const RESPONSENG_POSTAMBLE_MAGIC: u16 = 0x3362; // b3
 
-pub fn open_serial_comms(path: &str) -> Box<dyn serialport::SerialPort> {
+pub fn open_serial_comms(
+    path: &str,
+) -> Result<Box<dyn serialport::SerialPort>, Box<dyn std::error::Error>> {
     // connect to the proxmark
     let port = serialport::new(path, PM3_BAUD)
         .timeout(Duration::from_millis(2000))
-        .open()
-        .expect("Failed to open port");
+        .open()?;
 
-    return port;
+    return Ok(port);
 }
 
-pub fn clear_input_buffer(port: &mut Box<dyn serialport::SerialPort>) {
-    port.clear(serialport::ClearBuffer::Input);
+pub fn clear_input_buffer(
+    port: &mut Box<dyn serialport::SerialPort>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    return Ok(port.clear(serialport::ClearBuffer::Input)?);
 }
 
 pub fn send_and_get_command(
@@ -37,9 +40,9 @@ pub fn send_and_get_command(
     cmd: Command,
     data: &Vec<u8>,
     ng: bool,
-) -> PM3PacketResponseNG {
-    send_command(port, cmd, data, ng);
-    let response = get_response(port, cmd);
+) -> Result<PM3PacketResponseNG, Box<dyn std::error::Error>> {
+    send_command(port, cmd, data, ng)?;
+    let response = get_response(port, cmd)?;
 
     if response.cmd == Command::DebugPrintString as u16 {
         warn!("{}", str::from_utf8(&response.data).unwrap());
@@ -48,7 +51,7 @@ pub fn send_and_get_command(
     let expected_command = (if ng { cmd } else { Command::Ack }) as u16;
     assert!(response.cmd == expected_command);
 
-    return response;
+    return Ok(response);
 }
 
 pub fn send_command(
@@ -56,27 +59,28 @@ pub fn send_command(
     cmd: Command,
     data: &Vec<u8>,
     ng: bool,
-) {
+) -> Result<(), Box<dyn std::error::Error>> {
     let command = PM3PacketCommandInternal {
         cmd: cmd as u16,
         length_and_ng: merge_len_and_ng(data.len() as u16, ng),
         magic: COMMANDNG_PREAMBLE_MAGIC,
     };
     debug!("> command: {:x?} data: {:x?}", command, data);
-    let partly_encoded_command = bincode::serialize(&command).unwrap();
+    let partly_encoded_command = bincode::serialize(&command)?;
     let postamble_vec = COMMANDNG_POSTAMBLE_MAGIC.to_le_bytes().to_vec();
     let serial_buf = vec![partly_encoded_command, data.clone(), postamble_vec].concat();
 
     trace!("> command (b): {:x?}", serial_buf);
 
     clear_input_buffer(port);
-    port.write(serial_buf.as_slice()).expect("Write failed!");
+    port.write(serial_buf.as_slice())?;
+    return Ok(());
 }
 
 fn get_response(
     port: &mut Box<dyn serialport::SerialPort>,
     sent_cmd: Command,
-) -> PM3PacketResponseNG {
+) -> Result<PM3PacketResponseNG, Box<dyn std::error::Error>> {
     // TODO: handle CMD_WTX
     // TODO: handle things better in case there's multiple queued responses
     let data_offset = mem::size_of::<PM3PacketResponseNGInternal>();
@@ -87,9 +91,7 @@ fn get_response(
     let mut total_read: usize = 0;
     let mut expected_length: usize = 1;
     while total_read < expected_length {
-        let read_size = port
-            .read(&mut serial_buf[total_read..])
-            .expect("Found no data!");
+        let read_size = port.read(&mut serial_buf[total_read..])?;
         if total_read == 0 {
             // assert that we're indeed at the start of the response
             assert!(serial_buf[0..4] == RESPONSENG_PREAMBLE_MAGIC.to_le_bytes().to_vec());
@@ -120,7 +122,7 @@ fn get_response(
 
     debug!("< response: {:x?}", response);
 
-    return response;
+    return Ok(response);
 }
 
 fn map_ng_to_packet_response(

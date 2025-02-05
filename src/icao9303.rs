@@ -1,8 +1,5 @@
 // use crate::types;
-use cbc::cipher::{
-    inout::block_padding, BlockModeDecrypt, BlockModeEncrypt, KeyInit,
-    KeyIvInit,
-};
+use cbc::cipher::{inout::block_padding, BlockModeDecrypt, BlockModeEncrypt, KeyInit, KeyIvInit};
 use log::{debug, warn};
 use phf::phf_map;
 use retail_mac::{Mac, RetailMac};

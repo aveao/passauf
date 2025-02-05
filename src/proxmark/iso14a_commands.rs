@@ -30,18 +30,21 @@ pub fn exchange_command_14a(
     port: &mut Box<dyn serialport::SerialPort>,
     data: &Vec<u8>,
     flags: u16,
-) -> PM3PacketResponseNG {
+) -> Result<PM3PacketResponseNG, Box<dyn std::error::Error>> {
     // We're expanding data here to account for it being the old format (not ng).
     let full_data = convert_mix_args_to_ng(data, u64::from(flags), (data.len() as u64 & 0x1FF), 0);
-    let response = send_and_get_command(port, Command::HfIso14443AReader, &full_data, false);
+    let response = send_and_get_command(port, Command::HfIso14443AReader, &full_data, false)?;
 
     assert!(response.status == Status::Success as i8);
-    return response;
+    return Ok(response);
 }
 
-pub fn select_14a(port: &mut Box<dyn serialport::SerialPort>, disconnect: bool) -> bool {
+pub fn select_14a(
+    port: &mut Box<dyn serialport::SerialPort>,
+    disconnect: bool,
+) -> Result<u8, Box<dyn std::error::Error>> {
     let flags = ISO14ACommand::CONNECT | ISO14ACommand::NO_DISCONNECT;
-    let response = exchange_command_14a(port, &vec![], flags.bits());
+    let response = exchange_command_14a(port, &vec![], flags.bits())?;
 
     if disconnect {
         base_commands::hf_drop_field(port);
@@ -50,21 +53,21 @@ pub fn select_14a(port: &mut Box<dyn serialport::SerialPort>, disconnect: bool) 
     // 0: couldn't read, 1: OK, with ATS, 2: OK, no ATS, 3: proprietary Anticollision
     // TODO: no ATS is not currently implemented.
     assert!(response.arg0 == 1);
-    return response.arg0 == 1;
+    return Ok(response.arg0 as u8);
 }
 
 pub fn exchange_apdu_14a(
     port: &mut Box<dyn serialport::SerialPort>,
     data: &Vec<u8>,
     select: bool,
-) -> PM3PacketResponseNG {
+) -> Result<PM3PacketResponseNG, Box<dyn std::error::Error>> {
     if select {
-        select_14a(port, false);
+        select_14a(port, false)?;
     }
 
     let flags = ISO14ACommand::APDU | ISO14ACommand::NO_DISCONNECT;
-    let response = exchange_command_14a(port, data, flags.bits());
+    let response = exchange_command_14a(port, data, flags.bits())?;
 
     assert!(response.status == Status::Success as i8);
-    return response;
+    return Ok(response);
 }

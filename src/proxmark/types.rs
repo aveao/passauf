@@ -31,6 +31,7 @@ pub(crate) struct PM3PacketCommandInternal {
 }
 
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 #[repr(packed)] // If disabling this, hardcode data_offset to 10.
 pub(crate) struct PM3PacketResponseMIXInternal {
     pub magic: u32,
@@ -44,6 +45,7 @@ pub(crate) struct PM3PacketResponseMIXInternal {
 }
 
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 #[repr(packed)] // If disabling this, hardcode data_offset to 10.
 pub(crate) struct PM3PacketResponseNGInternal {
     pub magic: u32,
@@ -54,6 +56,7 @@ pub(crate) struct PM3PacketResponseNGInternal {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct PM3PacketResponseNG {
     pub length: u16,
     pub ng: bool,
