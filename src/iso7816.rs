@@ -48,6 +48,7 @@ pub enum StatusCode {
     FileFull = 0x6A84,
     LcTlvConflict = 0x6A85,
     IncorrectP1P2 = 0x6A86,
+    NcInconsistentWithP1P2 = 0x6A87,
     FileExists = 0x6A89,
     NotImplemented = 0x6AFF,
     WrongP1P2 = 0x6B00,
@@ -162,7 +163,7 @@ pub fn apdu_get_challenge() -> ApduCommand {
         p1: 0,
         p2: 0,
         data: vec![],
-        max_resp_len: 10, // 8 + SW for rnd_ic
+        max_resp_len: 8, // 8 + SW for rnd_ic
     };
 }
 
@@ -173,6 +174,6 @@ pub fn apdu_external_authentication(data: Vec<u8>) -> ApduCommand {
         p1: 0,
         p2: 0,
         data: data,
-        max_resp_len: 40, // 8 + SW for rnd_ic
+        max_resp_len: 40,
     };
 }

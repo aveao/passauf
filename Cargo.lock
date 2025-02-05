@@ -309,7 +309,6 @@ dependencies = [
  "asn1",
  "bincode",
  "bitflags 2.8.0",
- "block-padding",
  "cbc",
  "des",
  "log",

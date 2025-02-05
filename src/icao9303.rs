@@ -1,10 +1,9 @@
-use crate::types;
-use block_padding;
-use cbc::cipher::{BlockCipherEncrypt, KeyIvInit};
-use log::warn;
+// use crate::types;
+use cbc::cipher::{BlockModeEncrypt, KeyInit, KeyIvInit, inout::block_padding};
+use log::{debug, warn};
 use phf::phf_map;
 use rand::Rng;
-use retail_mac::{digest::KeyInit, Mac, RetailMac};
+use retail_mac::{Mac, RetailMac};
 use sha1::{Digest, Sha1};
 
 type RetailMacDes = RetailMac<des::Des>;
@@ -68,22 +67,32 @@ pub fn append_check_digit(text: &String) -> String {
 ///
 /// For BAC, this is always used.
 /// For PACE, this is only used for 128-bit AES keys.
-pub fn kdf_sha1(shared_secret: Vec<u8>, counter: u32) -> Vec<u8> {
-    let base_secret = vec![shared_secret, counter.to_be_bytes().to_vec()].concat();
+pub fn kdf_sha1(shared_secret: &Vec<u8>, counter: u32) -> Vec<u8> {
+    let base_secret = vec![shared_secret.as_slice(), &counter.to_be_bytes()].concat();
     let mut sha1_hasher = Sha1::new();
     sha1_hasher.update(base_secret.as_slice());
     // Trim to first 16 bytes.
-    let keydata = sha1_hasher.finalize_reset()[0..=16].to_vec();
-    // TODO: adjust parity bits
+    let keydata = sha1_hasher.finalize_reset()[0..16].to_vec();
+    // We can optionally adjust parity bits here, but rustcrypto/des doesn't care.
     return keydata;
 }
 
-pub fn calculate_bac(
+/// Applies Padding Method 2 based on ISO 9797-1.
+///
+/// Takes the data and returns it with the appropriate padding.
+pub fn padding_method_2(input: &Vec<u8>) -> Vec<u8> {
+    let padding = [0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+    // This assumes a block size of 8 bytes.
+    let padding_to_append = 8 - (input.len() % 8);
+    return vec![input.as_slice(), &padding[0..padding_to_append]].concat();
+}
+
+pub fn calculate_bac_key_and_mac(
     rnd_ic: Vec<u8>,
-    document_number: String,
-    date_of_birth: String,
-    date_of_expiry: String,
-) {
+    document_number: &String,
+    date_of_birth: &String,
+    date_of_expiry: &String,
+) -> (Vec<u8>, Vec<u8>) {
     let mut sha1_hasher = Sha1::new();
 
     // Generate RND.IFD
@@ -94,37 +103,42 @@ pub fn calculate_bac(
     let mut k_ifd = [0u8; 16];
     rand::rng().fill(&mut k_ifd[..]);
 
-    // Concatinate RND.IC, RND.IFD and K.IFD into S
-    let shared_secret = vec![rnd_ic.as_slice(), &rnd_ifd, &k_ifd].concat();
+    // Concatinate RND.IFD, RND.IC and K.IFD into S
+    let shared_secret = vec![&rnd_ifd, rnd_ic.as_slice(), &k_ifd].concat();
+    debug!("shared_secret: {:?}", shared_secret);
 
     // Concatinate MRZ with added check digits for key formation.
     let kmrz = vec![
-        append_check_digit(&document_number).into_bytes(),
-        append_check_digit(&date_of_birth).into_bytes(),
-        append_check_digit(&date_of_expiry).into_bytes(),
+        append_check_digit(document_number).as_bytes(),
+        append_check_digit(date_of_birth).as_bytes(),
+        append_check_digit(date_of_expiry).as_bytes(),
     ]
     .concat();
+    debug!("kmrz: {:?}", kmrz);
 
     // Calculate the seed for the key
     sha1_hasher.update(kmrz.as_slice());
-    let kseed = sha1_hasher.finalize_reset();
+    let kseed = sha1_hasher.finalize_reset()[0..16].to_vec();
 
     // Derive keys K.enc and K.mac
-    let kenc = kdf_sha1(kseed.to_vec(), 1);
-    let kmac = kdf_sha1(kseed.to_vec(), 2);
+    let kenc = kdf_sha1(&kseed, 1);
+    let kmac = kdf_sha1(&kseed, 2);
+    debug!("kenc ({:?}b): {:?}", kenc.len(), kenc);
+    debug!("kmac ({:?}b): {:?}", kmac.len(), kmac);
 
     // Calculate E.IFD = E(KEnc, S)
     let iv = [0x00; 8];
-    // ICAO 9303 calls for ISO 9797-1's padding 2,
-    // but block_padding's Iso7816 padding is identical to it.
-    let e_ifd = TDesCbcEnc::new(kenc.into(), &iv.into())
-        .encrypt_padded_vec::<block_padding::Iso7816>(&shared_secret);
-
-    // uint8_t m_ifd[8] = { 0x00 };
-    // retail_mac(kmac, e_ifd, 32, m_ifd);
+    let e_ifd = TDesCbcEnc::new_from_slices(kenc.as_slice(), iv.as_slice()).unwrap()
+        .encrypt_padded_vec::<block_padding::NoPadding>(&shared_secret);
+    debug!("e_ifd: {:?}", e_ifd);
 
     // Calculate M.IFD = MAC(K.MAC, E.IFD)
-    let mut mac = RetailMacDes::new_from_slice(kmac.as_slice()).unwrap();
+    let mut m_ifd_rmac = RetailMacDes::new_from_slice(kmac.as_slice()).unwrap();
+    m_ifd_rmac.update(padding_method_2(&e_ifd).as_slice());
+    let m_ifd = m_ifd_rmac.finalize().as_bytes().to_vec();
+    debug!("m_ifd: {:?}", m_ifd);
+
+    return (e_ifd, m_ifd);
 }
 
 fn generic_parser(data: Vec<u8>) {
@@ -137,21 +151,6 @@ fn generic_parser_asn1(data: Vec<u8>) {
 
 fn cardaccess_parser(data: Vec<u8>) {
     warn!("Read file ({:?}b): {:x?}", data.len(), data);
-    return;
-    // let fake_data = [0x31, 0x82, 0x1, 0x24, 0x30, 0xd, 0x6, 0x8, 0x4, 0x0, 0x7f, 0x0, 0x7, 0x2, 0x2, 0x2, 0x2, 0x1, 0x2, 0x30, 0x12, 0x6, 0xa, 0x4, 0x0, 0x7f, 0x0, 0x7, 0x2, 0x2, 0x3, 0x2, 0x2, 0x2, 0x1, 0x2, 0x2, 0x1, 0x48, 0x30, 0x12, 0x6, 0xa, 0x4, 0x0, 0x7f, 0x0, 0x7, 0x2, 0x2, 0x3, 0x2, 0x2, 0x2, 0x1, 0x3, 0x2, 0x1, 0x4f, 0x30, 0x12, 0x6, 0xa, 0x4, 0x0, 0x7f, 0x0, 0x7, 0x2, 0x2, 0x4, 0x2, 0x2, 0x2, 0x1, 0x2, 0x2, 0x1, 0xd, 0x30, 0x12, 0x6, 0xa, 0x4, 0x0, 0x7f, 0x0, 0x7, 0x2, 0x2, 0x4, 0x6, 0x2, 0x2, 0x1, 0x2, 0x2, 0x1, 0xd, 0x30, 0x1b, 0x6, 0xb, 0x4, 0x0, 0x7f, 0x0, 0x7, 0x2, 0x2, 0xb, 0x1, 0x2, 0x3, 0x30, 0x9, 0x2, 0x1, 0x1, 0x2, 0x1, 0x0, 0x2,1, 0x1, 0x2, 0x1, 0x4f, 0x30, 0x1c, 0x6, 0x9, 0x4, 0x0, 0x7f, 0x0, 0x7, 0x2, 0x2, 0x3, 0x2, 0x30, 0xc, 0x6, 0x7, 0x4, 0x0, 0x7f, 0x0, 0x7, 0x1, 0x2, 0x2, 0x1, 0xd, 0x2, 0x1, 0x48, 0x30, 0x1c, 0x6, 0x9, 0x4, 0x0, 0x7f, 0x0, 0x7, 0x2, 0x2, 0x3, 0x2, 0x30, 0xc, 0x6, 0x7, 0x4, 0x0, 0x7f, 0x0, 0x7, 0x1, 0x2, 0x2, 0x1, 0xd, 0x2, 0x1, 0x4f, 0x30, 0x2a, 0x6, 0x8, 0x4, 0x0, 0x7f, 0x0, 0x7, 0x2, 0x2, 0x6, 0x16, 0x1e, 0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x62, 0x73, 0x69, 0x2e, 0x62, 0x75, 0x6e, 0x64, 0x2e, 0x64, 0x65, 0x2f, 0x63, 0x69, 0x66, 0x2f, 0x6e, 0x70, 0x61, 0x2e, 0x78, 0x6d, 0x6c, 0x30, 0x3e, 0x6, 0x8, 0x4, 0x0, 0x7f, 0x0, 0x7, 0x2, 0x2, 0x8, 0x31, 0x32, 0x30,12, 0x6, 0xa, 0x4, 0x0, 0x7f, 0x0, 0x7, 0x2, 0x2, 0x3, 0x2, 0x2, 0x2, 0x1, 0x2, 0x2, 0x1, 0x49, 0x30, 0x1c, 0x6, 0x9, 0x4, 0x0, 0x7f, 0x0, 0x7, 0x2, 0x2, 0x3, 0x2, 0x30, 0xc, 0x6, 0x7, 0x4, 0x0, 0x7f, 0x0, 0x7, 0x1, 0x2, 0x2, 0x1, 0xd, 0x2, 0x1, 0x49].to_vec();
-    let cardaccess_data = asn1::parse_single::<types::EFCardAccess>(&data).unwrap();
-
-    // for security_info in cardaccess_data.security_infos {
-    //     warn!("Parsed of file: {:x?}", security_info);
-    // }
-    //    let parsed_set = parse_der(&data).unwrap().1;
-    //    warn!("DER parsed of file: {:x?}", parsed_set);
-    //    assert!(parsed_set.header.tag() == der_parser::ber::Tag::Set);
-    //    for object in parsed_set.content.as_set().unwrap() {
-    // warn!("obj: {:x?}", object);
-    // // check that they're all tag 10 (Sequence)
-    // //
-    //    }
 }
 
 pub static AID_MRTD_LDS1: [u8; 7] = [0xA0, 0x00, 0x00, 0x02, 0x47, 0x10, 0x01];

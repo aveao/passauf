@@ -17,7 +17,7 @@ asn1 = "0.20.0"
 rand = "0.9.0"
 # this is pending cipher/digest release
 retail-mac = "0.1.0"
-block-padding = { version = "0.4.0-rc.2", features = [] }
+# block-padding = { version = "0.4.0-rc.2", features = [] }
 sha1 = "0.11.0-pre.4"
 des = "0.9.0-pre.2"
 cbc = { version = "0.2.0-pre.2", features = ["alloc"] }
@@ -36,3 +36,6 @@ pace = []
 
 [patch.crates-io]
 retail-mac = { git = 'https://github.com/RustCrypto/MACs.git' }
+# inout = { path = "/tmp/utils/inout" }
+# cbc = { path = "/tmp/block-modes/cbc" }
+# des = { path = "/tmp/block-ciphers/des" }

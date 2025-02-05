@@ -3,6 +3,7 @@ mod iso7816;
 #[cfg(feature = "proxmark")]
 mod proxmark;
 mod types;
+use std::env;
 use iso7816::StatusCode;
 use log::{debug, info, warn};
 use simplelog::{CombinedLogger, TermLogger};
@@ -136,30 +137,40 @@ fn select_and_read_file(
 
 fn bac(
     port: &mut Box<dyn serialport::SerialPort>,
-    document_number: String,
-    date_of_birth: String,
-    date_of_expiry: String,
+    document_number: &String,
+    date_of_birth: &String,
+    date_of_expiry: &String,
 ) {
-    type TDesCbcEnc = cbc::Encryptor<des::TdesEde2>;
     info!("Starting Basic Access Control");
 
     // Get RND.IC by calling GET_CHALLENGE.
     let mut apdu = iso7816::apdu_get_challenge();
     let (response, _) = exchange_apdu(port, &mut apdu, true);
-    let rnd_ic = &response.data[0..=8];
+    let rnd_ic = &response.data[0..8];
 
-    icao9303::calculate_bac(
+    // Calculate E_IFD and M_IFD
+    let (e_ifd, m_ifd) = icao9303::calculate_bac_key_and_mac(
         rnd_ic.to_vec(),
         document_number,
         date_of_birth,
         date_of_expiry,
     );
+
+    // Do EXTERNAL_AUTHENTICATION with the key and MAC we calculated.
+    let external_auth_data = vec![e_ifd, m_ifd].concat();
+    let mut apdu = iso7816::apdu_external_authentication(external_auth_data);
+    let (response, _) = exchange_apdu(port, &mut apdu, true);
+    info!("Successfully authenticated!");
+
+    // TODO: calculate session_keys
 }
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+
     let log_level = simplelog::LevelFilter::Info;
     // TODO: make the path adjustable
-    let mut port = proxmark::connect("/dev/ttyACM0");
+    let mut port = proxmark::connect(&args[1]);
     CombinedLogger::init(vec![TermLogger::new(
         log_level,
         simplelog::Config::default(),
@@ -202,6 +213,7 @@ fn main() {
     let (_, status_code) = exchange_apdu(&mut port, &mut apdu, true);
 
     // auth goes here
+    bac(&mut port, &args[2], &args[3], &args[4]);
 
     // read all the rest of files
 
