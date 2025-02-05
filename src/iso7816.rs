@@ -1,6 +1,9 @@
 ///! ISO 7816 APDU handlers (for ICAO 9303 only)
-use log::{error, trace};
+use log::{debug, error, trace};
 use strum::{FromRepr, IntoStaticStr};
+
+use crate::helpers;
+use crate::icao9303;
 
 #[repr(u8)]
 pub enum Command {
@@ -95,6 +98,117 @@ impl ApduCommand {
             le,
         ]
         .concat();
+        return apdu;
+    }
+
+    pub fn bac_secure_serialize(
+        &self,
+        ssc: &mut u64,
+        ks_enc: &Vec<u8>,
+        ks_mac: &Vec<u8>,
+    ) -> Vec<u8> {
+        // Command APDU: [DO‘85’ or DO‘87’] [DO‘97’] DO‘8E’.
+        // Relevant for BER-TLV: ISO 7816-4-2020+A1-2023: 10.2.3, Table 50 and surroundings
+
+        // Le: length of expected response
+        let base_le = Self::get_field_len_vec(self.max_resp_len);
+        // ICAO 9303 p11: "The command header MUST be included in the MAC calculation,
+        // therefore the class byte CLA = 0x0C MUST be used."
+        let cmd = vec![0x0C, self.ins, self.p1, self.p2];
+        let padded_cmd = icao9303::padding_method_2(&cmd);
+        debug!("padded_cmd: {:02x?}", padded_cmd);
+
+        // Padded Command + Data as BER-TLV (if set) + Padded Response Length as BER-TLV (if set) + MAC
+        let mut secure_data: Vec<u8> = vec![];
+
+        if !self.data.is_empty() {
+            let padded_data = icao9303::padding_method_2(&self.data);
+            debug!("padded_data: {:02x?}", padded_data);
+            let encrypted_data = icao9303::tdes_enc(ks_enc, &padded_data);
+            debug!("encrypted_data: {:02x?}", encrypted_data);
+
+            // ICAO 9303 p11: "In case INS is even, DO‘87’ SHALL be used,
+            // and in case INS is odd, DO‘85’ SHALL be used."
+            // However, BSI TR-03110 does not use DO'85' at all.
+            // Generally, '87' may be enough.
+
+            // if instruction is an even number
+            if self.ins % 2 == 0 {
+                // (T)ag is 0x87, "Padding-content indicator byte followed by cryptogram".
+                // (L)ength is determined dynamically, the +1 is due to the padding-content indicator byte.
+                // (V)alue in DO'87' is data prepended with the Padding-content indicator byte.
+                // 0x01 is padding method 2 according to ISO 7816-4-2020+A1-2023, Table 53.
+                // TODO: make this not suck
+                let do_87_tlv = vec![
+                    &[0x87],
+                    helpers::asn1_gen_len(encrypted_data.len() + 1).as_slice(),
+                    &[0x01],
+                    &encrypted_data,
+                ]
+                .concat();
+                debug!("do_87_tlv: {:02x?}", do_87_tlv);
+                secure_data.extend_from_slice(do_87_tlv.as_slice());
+            // if instruction is an odd number
+            } else {
+                // (T)ag is 0x85, "Cryptogram (plain value encoded in ber-tlv, but not including SM DOs)".
+                panic!("DO85 is not implemented.");
+            }
+        }
+
+        if self.max_resp_len != 0 {
+            // (T)ag is 0x97, "One or two bytes encoding Le in the unsecured C-RP (possibly empty, see 10.5)"
+            // (V)alue is the original Le
+            let do_97_tlv = vec![
+                &[0x97],
+                helpers::asn1_gen_len(base_le.len()).as_slice(),
+                &base_le,
+            ]
+            .concat();
+            debug!("do_97_tlv: {:02x?}", do_97_tlv);
+            secure_data.extend_from_slice(do_97_tlv.as_slice());
+        }
+
+        // emrtd_bump_ssc(ssc);
+
+        debug!("pre-bump ssc: {:02x?}", ssc);
+        *ssc += 1;
+        debug!("post-bump ssc: {:02x?}", ssc);
+
+        // Pad secure data so far with Padding Method 2
+        debug!("unpadded secure_data: {:02x?}", secure_data);
+        let padded_secure_data = icao9303::padding_method_2(
+            &vec![
+                ssc.to_be_bytes().as_slice(),
+                padded_cmd.as_slice(),
+                secure_data.as_slice(),
+            ]
+            .concat(),
+        );
+        debug!("padded secure_data: {:02x?}", padded_secure_data);
+
+        // Calculate the MAC for the secure data so far
+        let secure_data_mac = icao9303::retail_mac(ks_mac, &padded_secure_data);
+        debug!("secure_data_mac: {:02x?}", secure_data_mac);
+
+        // (T)ag is 0x97, "One or two bytes encoding Le in the unsecured C-RP (possibly empty, see 10.5)"
+        // (V)alue is the dynamic length of the MAC (should be 8 bytes)
+        let do_8e_tlv = vec![
+            &[0x8E],
+            helpers::asn1_gen_len(secure_data_mac.len()).as_slice(),
+            &secure_data_mac,
+        ]
+        .concat();
+        debug!("do_8e_tlv: {:02x?}", do_8e_tlv);
+        secure_data.extend_from_slice(do_8e_tlv.as_slice());
+        debug!("final secure_data: {:02x?}", secure_data);
+
+        // Lc: length of data
+        let lc = Self::get_field_len_vec(secure_data.len() as u16);
+
+        // Outer Le is set to 0x00 to allow the full frame
+        let le = vec![0x00];
+
+        let apdu = vec![cmd, lc, secure_data, le].concat();
         return apdu;
     }
 }

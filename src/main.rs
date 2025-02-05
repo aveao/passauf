@@ -127,8 +127,11 @@ fn main() {
 
     // Authenticate with BAC.
     // TODO: if we have PACE, we should use that instead.
-    let (ks_enc, ks_mac, ssc) =
+    let (ks_enc, ks_mac, mut ssc) =
         do_authentication(pace_available, &mut port, &args[2], &args[3], &args[4]);
+
+    let file_data =
+        helpers::secure_select_and_read_file(&mut port, "EF.COM", true, &mut ssc, &ks_enc, &ks_mac);
 
     // read all the rest of files
 

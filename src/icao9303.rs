@@ -90,6 +90,24 @@ pub fn padding_method_2(input: &Vec<u8>) -> Vec<u8> {
     return vec![input.as_slice(), &padding[0..padding_to_append]].concat();
 }
 
+/// Applies Retail Mac based on ISO 9797-1.
+///
+/// Does not apply padding method 2, it should be done separately.
+pub fn retail_mac(k_mac: &[u8], input_data: &Vec<u8>) -> Vec<u8> {
+    let mut rmac_instance = RetailMacDes::new_from_slice(k_mac).unwrap();
+    rmac_instance.update(input_data);
+    return rmac_instance.finalize().as_bytes().to_vec();
+}
+
+/// Encrypts given data according to 3DES as used in ICAO 9303
+///
+/// Data should be pre-padded.
+pub fn tdes_enc(k_enc: &[u8], data: &[u8]) -> Vec<u8> {
+    return TDesCbcEnc::new_from_slices(k_enc, TDES_IV.as_slice())
+        .unwrap()
+        .encrypt_padded_vec::<block_padding::NoPadding>(data);
+}
+
 /// Calculates E.IFD and M.IFD for BAC
 ///
 /// Returns K.enc, E.ifd and M.ifd
@@ -137,16 +155,15 @@ pub fn calculate_bac_eifd_and_mifd(
     debug!("K.mac: {:?}", k_mac);
 
     // Calculate E.IFD = E(KEnc, S)
-    let e_ifd = TDesCbcEnc::new_from_slices(k_enc.as_slice(), TDES_IV.as_slice())
-        .unwrap()
-        .encrypt_padded_vec::<block_padding::NoPadding>(&shared_secret);
+    let e_ifd = tdes_enc(k_enc.as_slice(), &shared_secret);
     debug!("E.ifd: {:?}", e_ifd);
 
     // Calculate M.IFD = MAC(K.MAC, E.IFD)
     // Here we use Retail Mac (ISO 9797-1 MAC format 3) with Padding Method 2
-    let mut rmac_instance = RetailMacDes::new_from_slice(k_mac.as_slice()).unwrap();
-    rmac_instance.update(padding_method_2(&e_ifd).as_slice());
-    let m_ifd = rmac_instance.finalize().as_bytes().to_vec();
+    let m_ifd = retail_mac(&k_mac, &padding_method_2(&e_ifd));
+    // let mut rmac_instance = RetailMacDes::new_from_slice(k_mac.as_slice()).unwrap();
+    // rmac_instance.update(padding_method_2(&e_ifd).as_slice());
+    // let m_ifd = rmac_instance.finalize().as_bytes().to_vec();
     debug!("M.ifd: {:?}", m_ifd);
 
     return (k_enc, e_ifd, m_ifd);
@@ -182,8 +199,8 @@ pub fn calculate_bac_session_keys(
     // Calculate session keys (KS.enc, KS.mac)
     let ks_enc = kdf_sha1(&k_seed, 1);
     let ks_mac = kdf_sha1(&k_seed, 2);
-    debug!("KS.enc: {:x?}", k_seed);
-    debug!("KS.mac: {:x?}", k_seed);
+    debug!("KS.enc: {:x?}", ks_enc);
+    debug!("KS.mac: {:x?}", ks_mac);
     return (ks_enc, ks_mac);
 }
 
