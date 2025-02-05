@@ -1,15 +1,21 @@
 // use crate::types;
-use cbc::cipher::{BlockModeEncrypt, KeyInit, KeyIvInit, inout::block_padding};
+use cbc::cipher::{
+    inout::block_padding, BlockModeDecrypt, BlockModeEncrypt, KeyInit,
+    KeyIvInit,
+};
 use log::{debug, warn};
 use phf::phf_map;
-use rand::Rng;
 use retail_mac::{Mac, RetailMac};
 use sha1::{Digest, Sha1};
 
+const TDES_IV: [u8; 8] = [0x00u8; 8];
+
 type RetailMacDes = RetailMac<des::Des>;
 type TDesCbcEnc = cbc::Encryptor<des::TdesEde2>;
+type TDesCbcDec = cbc::Decryptor<des::TdesEde2>;
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct DataGroup {
     pub tag: u8,
     pub dg_num: u8,
@@ -67,14 +73,14 @@ pub fn append_check_digit(text: &String) -> String {
 ///
 /// For BAC, this is always used.
 /// For PACE, this is only used for 128-bit AES keys.
-pub fn kdf_sha1(shared_secret: &Vec<u8>, counter: u32) -> Vec<u8> {
-    let base_secret = vec![shared_secret.as_slice(), &counter.to_be_bytes()].concat();
+pub fn kdf_sha1(shared_secret: &[u8], counter: u32) -> Vec<u8> {
+    let base_secret = vec![shared_secret, &counter.to_be_bytes()].concat();
     let mut sha1_hasher = Sha1::new();
     sha1_hasher.update(base_secret.as_slice());
     // Trim to first 16 bytes.
-    let keydata = sha1_hasher.finalize_reset()[0..16].to_vec();
+    let keydata = &sha1_hasher.finalize_reset()[0..16];
     // We can optionally adjust parity bits here, but rustcrypto/des doesn't care.
-    return keydata;
+    return keydata.to_vec();
 }
 
 /// Applies Padding Method 2 based on ISO 9797-1.
@@ -87,58 +93,101 @@ pub fn padding_method_2(input: &Vec<u8>) -> Vec<u8> {
     return vec![input.as_slice(), &padding[0..padding_to_append]].concat();
 }
 
-pub fn calculate_bac_key_and_mac(
-    rnd_ic: Vec<u8>,
+/// Calculates E.IFD and M.IFD for BAC
+///
+/// Returns K.enc, E.ifd and M.ifd
+pub fn calculate_bac_eifd_and_mifd(
+    rnd_ic: &[u8],
+    rnd_ifd: &[u8],
+    k_ifd: &[u8],
     document_number: &String,
     date_of_birth: &String,
     date_of_expiry: &String,
-) -> (Vec<u8>, Vec<u8>) {
+) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let mut sha1_hasher = Sha1::new();
+    // Glossary of terms for the authentication:
+    // RND. = Random Number
+    // K. = Key, KS. = Session Key, E. = Encrypted
+    // M./.MAC = MAC
+    // .IC = Integrated Circuit (eMRTD)
+    // .IFD = Interface Device (Us)
+    // .ENC = Encryption
+    // .MRZ = Machine Readable Zone
+    // .seed = Seed to generate a key
+    // SSC = Send Sequence Counter
 
-    // Generate RND.IFD
-    let mut rnd_ifd = [0u8; 8];
-    rand::rng().fill(&mut rnd_ifd[..]);
-
-    // Generate keying material K.IFD
-    let mut k_ifd = [0u8; 16];
-    rand::rng().fill(&mut k_ifd[..]);
-
-    // Concatinate RND.IFD, RND.IC and K.IFD into S
-    let shared_secret = vec![&rnd_ifd, rnd_ic.as_slice(), &k_ifd].concat();
+    // Concatinate RND.IFD, RND.IC and K.IFD into S (shared secret)
+    let shared_secret = vec![rnd_ifd, rnd_ic, k_ifd].concat();
     debug!("shared_secret: {:?}", shared_secret);
 
     // Concatinate MRZ with added check digits for key formation.
-    let kmrz = vec![
+    let k_mrz = vec![
         append_check_digit(document_number).as_bytes(),
         append_check_digit(date_of_birth).as_bytes(),
         append_check_digit(date_of_expiry).as_bytes(),
     ]
     .concat();
-    debug!("kmrz: {:?}", kmrz);
+    debug!("K.mrz: {:?}", k_mrz);
 
     // Calculate the seed for the key
-    sha1_hasher.update(kmrz.as_slice());
-    let kseed = sha1_hasher.finalize_reset()[0..16].to_vec();
+    sha1_hasher.update(k_mrz.as_slice());
+    let k_seed = &sha1_hasher.finalize_reset()[0..16];
 
     // Derive keys K.enc and K.mac
-    let kenc = kdf_sha1(&kseed, 1);
-    let kmac = kdf_sha1(&kseed, 2);
-    debug!("kenc ({:?}b): {:?}", kenc.len(), kenc);
-    debug!("kmac ({:?}b): {:?}", kmac.len(), kmac);
+    let k_enc = kdf_sha1(k_seed, 1);
+    let k_mac = kdf_sha1(k_seed, 2);
+    debug!("K.enc: {:?}", k_enc);
+    debug!("K.mac: {:?}", k_mac);
 
     // Calculate E.IFD = E(KEnc, S)
-    let iv = [0x00; 8];
-    let e_ifd = TDesCbcEnc::new_from_slices(kenc.as_slice(), iv.as_slice()).unwrap()
+    let e_ifd = TDesCbcEnc::new_from_slices(k_enc.as_slice(), TDES_IV.as_slice())
+        .unwrap()
         .encrypt_padded_vec::<block_padding::NoPadding>(&shared_secret);
-    debug!("e_ifd: {:?}", e_ifd);
+    debug!("E.ifd: {:?}", e_ifd);
 
     // Calculate M.IFD = MAC(K.MAC, E.IFD)
-    let mut m_ifd_rmac = RetailMacDes::new_from_slice(kmac.as_slice()).unwrap();
-    m_ifd_rmac.update(padding_method_2(&e_ifd).as_slice());
-    let m_ifd = m_ifd_rmac.finalize().as_bytes().to_vec();
-    debug!("m_ifd: {:?}", m_ifd);
+    // Here we use Retail Mac (ISO 9797-1 MAC format 3) with Padding Method 2
+    let mut rmac_instance = RetailMacDes::new_from_slice(k_mac.as_slice()).unwrap();
+    rmac_instance.update(padding_method_2(&e_ifd).as_slice());
+    let m_ifd = rmac_instance.finalize().as_bytes().to_vec();
+    debug!("M.ifd: {:?}", m_ifd);
 
-    return (e_ifd, m_ifd);
+    return (k_enc, e_ifd, m_ifd);
+}
+
+/// Calculate session keys for BAC
+///
+/// Returns KS.enc and KS.mac
+pub fn calculate_bac_session_keys(
+    auth_resp: &[u8],
+    k_enc: &[u8],
+    rnd_ifd: &[u8],
+    k_ifd: &[u8],
+) -> (Vec<u8>, Vec<u8>) {
+    // Decrypt data we receive as response to BAC EXTERNAL_AUTHENTICATE
+    let dec_resp = TDesCbcDec::new_from_slices(k_enc, TDES_IV.as_slice())
+        .unwrap()
+        .decrypt_padded_vec::<block_padding::NoPadding>(&auth_resp)
+        .unwrap();
+    debug!("Decoded auth response: {:x?}", dec_resp);
+    // Compare received RND.IFD with generated RND.IFD.
+    assert!(&dec_resp[8..16] == rnd_ifd);
+
+    // Calculate K.seed = XOR(K.IFD, K.IC)
+    let k_ic = &dec_resp[16..32];
+    debug!("K.IC: {:x?}", k_ic);
+    let mut k_seed = [0u8; 16];
+    for i in 0..16 {
+        k_seed[i] = k_ifd[i] ^ k_ic[i];
+    }
+    debug!("K.seed: {:x?}", k_seed);
+
+    // Calculate session keys (KS.enc, KS.mac)
+    let ks_enc = kdf_sha1(&k_seed, 1);
+    let ks_mac = kdf_sha1(&k_seed, 2);
+    debug!("KS.enc: {:x?}", k_seed);
+    debug!("KS.mac: {:x?}", k_seed);
+    return (ks_enc, ks_mac);
 }
 
 fn generic_parser(data: Vec<u8>) {

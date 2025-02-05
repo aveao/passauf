@@ -1,3 +1,4 @@
+///! ISO 7816 APDU handlers (for ICAO 9303 only)
 use log::{error, trace};
 use strum::{FromRepr, IntoStaticStr};
 
@@ -10,6 +11,7 @@ pub enum Command {
 }
 
 // Taken from https://github.com/RfidResearchGroup/proxmark3/blob/master/include/protocols.h#L502
+// and extended from ISO/IEC 7816-4
 #[repr(u16)]
 #[derive(Debug, FromRepr, IntoStaticStr, PartialEq, Clone, Copy)]
 pub enum StatusCode {
@@ -163,7 +165,7 @@ pub fn apdu_get_challenge() -> ApduCommand {
         p1: 0,
         p2: 0,
         data: vec![],
-        max_resp_len: 8, // 8 + SW for rnd_ic
+        max_resp_len: 8, // rnd.ic is 8 bytes
     };
 }
 
@@ -174,6 +176,7 @@ pub fn apdu_external_authentication(data: Vec<u8>) -> ApduCommand {
         p1: 0,
         p2: 0,
         data: data,
+        // magic length from ICAO 9303 p11 (0x28)
         max_resp_len: 40,
     };
 }

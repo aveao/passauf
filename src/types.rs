@@ -10,7 +10,10 @@ pub static PACE_DOMAIN_PARAMETERS_OIDS: phf::Map<&'static str, &'static asn1::Ob
     "ECDH_CAM" => &asn1::oid!(0x00, 0x04, 0x00, 0x7F, 0x00, 0x07, 0x02, 0x02, 0x04, 0x06),
 };
 
-pub static CHIP_AUTH_DOMAIN_PARAMETERS_OIDS: phf::Map<&'static str, &'static asn1::ObjectIdentifier> = phf_map! {
+pub static CHIP_AUTH_DOMAIN_PARAMETERS_OIDS: phf::Map<
+    &'static str,
+    &'static asn1::ObjectIdentifier,
+> = phf_map! {
     "DH" => &asn1::oid!(0x00, 0x04, 0x00, 0x7F, 0x00, 0x07, 0x02, 0x02, 0x03, 0x01),
     "ECDH" => &asn1::oid!(0x00, 0x04, 0x00, 0x7F, 0x00, 0x07, 0x02, 0x02, 0x03, 0x02),
 };
@@ -103,7 +106,6 @@ struct SecurityInfos {
     pub pseudonymous_signature_authentication_info: Vec<PSAInfo>,
     // #[defined_by(OID_CARD_INFO)]
     pub card_info: Vec<CardInfo>,
-
     // TODO: PasswordInfo (optional)
     // TODO: PSMInfo (conditional)
     // TODO: PSCInfo (conditional)

@@ -3,11 +3,12 @@ mod iso7816;
 #[cfg(feature = "proxmark")]
 mod proxmark;
 mod types;
-use std::env;
 use iso7816::StatusCode;
 use log::{debug, info, warn};
+use rand::Rng;
 use simplelog::{CombinedLogger, TermLogger};
 use std::cmp::min;
+use std::env;
 
 fn exchange_apdu(
     port: &mut Box<dyn serialport::SerialPort>,
@@ -146,11 +147,23 @@ fn bac(
     // Get RND.IC by calling GET_CHALLENGE.
     let mut apdu = iso7816::apdu_get_challenge();
     let (response, _) = exchange_apdu(port, &mut apdu, true);
+    // get the first 8 bytes of the response, which is the actual response
+    // (rest is SW and checksum)
     let rnd_ic = &response.data[0..8];
 
-    // Calculate E_IFD and M_IFD
-    let (e_ifd, m_ifd) = icao9303::calculate_bac_key_and_mac(
-        rnd_ic.to_vec(),
+    // Generate RND.IFD
+    let mut rnd_ifd = [0u8; 8];
+    rand::rng().fill(&mut rnd_ifd[..]);
+
+    // Generate keying material K.IFD
+    let mut k_ifd = [0u8; 16];
+    rand::rng().fill(&mut k_ifd[..]);
+
+    // Calculate K.ENC, E.IFD and M.IFD
+    let (k_enc, e_ifd, m_ifd) = icao9303::calculate_bac_eifd_and_mifd(
+        rnd_ic,
+        &rnd_ifd,
+        &k_ifd,
         document_number,
         date_of_birth,
         date_of_expiry,
@@ -162,7 +175,16 @@ fn bac(
     let (response, _) = exchange_apdu(port, &mut apdu, true);
     info!("Successfully authenticated!");
 
-    // TODO: calculate session_keys
+    // Calculate session keys
+    let (ks_enc, ks_mac) = icao9303::calculate_bac_session_keys(
+        &response.data[0..40],
+        k_enc.as_slice(),
+        rnd_ifd.as_slice(),
+        k_ifd.as_slice(),
+    );
+
+    // Calculate session counter
+    let ssc = vec![&rnd_ic[4..8], &rnd_ifd[4..8]].concat();
 }
 
 fn main() {
