@@ -1,6 +1,6 @@
 // use crate::types;
 use cbc::cipher::{inout::block_padding, BlockModeDecrypt, BlockModeEncrypt, KeyInit, KeyIvInit};
-use log::{debug, warn};
+use log::{debug, info};
 use phf::phf_map;
 use retail_mac::{Mac, RetailMac};
 use sha1::{Digest, Sha1};
@@ -187,25 +187,22 @@ pub fn calculate_bac_session_keys(
     return (ks_enc, ks_mac);
 }
 
-/// Calculates initial Send Sequence Counter for 3DES
-///
-/// For BAC, this is always used.
-/// For PACE, this is only used for 3DES.
-pub fn calculate_initial_ssc_3des(rnd_ic: &[u8], rnd_ifd: &[u8]) -> u64 {
+/// Calculates initial Send Sequence Counter for BAC
+pub fn calculate_initial_ssc_bac(rnd_ic: &[u8], rnd_ifd: &[u8]) -> u64 {
     let ssc_bytes = vec![&rnd_ic[4..8], &rnd_ifd[4..8]].concat();
     return u64::from_be_bytes(ssc_bytes.try_into().unwrap());
 }
 
 fn generic_parser(data: Vec<u8>) {
-    warn!("Read file ({:?}b): {:x?}", data.len(), data);
+    info!("Read file ({:?}b): {:x?}", data.len(), data);
 }
 
 fn generic_parser_asn1(data: Vec<u8>) {
-    warn!("Read file ({:?}b): {:x?}", data.len(), data);
+    info!("Read file ({:?}b): {:x?}", data.len(), data);
 }
 
 fn cardaccess_parser(data: Vec<u8>) {
-    warn!("Read file ({:?}b): {:x?}", data.len(), data);
+    info!("Read file ({:?}b): {:x?}", data.len(), data);
 }
 
 pub static AID_MRTD_LDS1: [u8; 7] = [0xA0, 0x00, 0x00, 0x02, 0x47, 0x10, 0x01];

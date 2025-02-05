@@ -57,7 +57,7 @@ fn do_bac_authentication(
     );
 
     // Calculate session counter
-    let ssc = icao9303::calculate_initial_ssc_3des(rnd_ic, &rnd_ifd);
+    let ssc = icao9303::calculate_initial_ssc_bac(rnd_ic, &rnd_ifd);
 
     return (ks_enc, ks_mac, ssc);
 }
