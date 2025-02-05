@@ -66,7 +66,7 @@ pub fn append_check_digit(text: &String) -> String {
     return result;
 }
 
-/// Does key derivation based on ICAO 9303 p11 for SHA1
+/// Does key derivation based on ICAO 9303 p11 for SHA-1
 ///
 /// For BAC, this is always used.
 /// For PACE, this is only used for 128-bit AES keys.
@@ -185,6 +185,15 @@ pub fn calculate_bac_session_keys(
     debug!("KS.enc: {:x?}", k_seed);
     debug!("KS.mac: {:x?}", k_seed);
     return (ks_enc, ks_mac);
+}
+
+/// Calculates initial Send Sequence Counter for 3DES
+///
+/// For BAC, this is always used.
+/// For PACE, this is only used for 3DES.
+pub fn calculate_initial_ssc_3des(rnd_ic: &[u8], rnd_ifd: &[u8]) -> u64 {
+    let ssc_bytes = vec![&rnd_ic[4..8], &rnd_ifd[4..8]].concat();
+    return u64::from_be_bytes(ssc_bytes.try_into().unwrap());
 }
 
 fn generic_parser(data: Vec<u8>) {

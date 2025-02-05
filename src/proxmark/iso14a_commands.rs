@@ -32,7 +32,7 @@ pub fn exchange_command_14a(
     flags: u16,
 ) -> Result<PM3PacketResponseNG, Box<dyn std::error::Error>> {
     // We're expanding data here to account for it being the old format (not ng).
-    let full_data = convert_mix_args_to_ng(data, u64::from(flags), (data.len() as u64 & 0x1FF), 0);
+    let full_data = convert_mix_args_to_ng(data, u64::from(flags), data.len() as u64 & 0x1FF, 0);
     let response = send_and_get_command(port, Command::HfIso14443AReader, &full_data, false)?;
 
     assert!(response.status == Status::Success as i8);
@@ -47,7 +47,7 @@ pub fn select_14a(
     let response = exchange_command_14a(port, &vec![], flags.bits())?;
 
     if disconnect {
-        base_commands::hf_drop_field(port);
+        base_commands::hf_drop_field(port)?;
     }
 
     // 0: couldn't read, 1: OK, with ATS, 2: OK, no ATS, 3: proprietary Anticollision

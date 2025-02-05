@@ -60,6 +60,9 @@ pub fn send_command(
     data: &Vec<u8>,
     ng: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Ensure that we never send a message that's too long
+    assert!(data.len() <= CMD_MAX_DATA_SIZE);
+
     let command = PM3PacketCommandInternal {
         cmd: cmd as u16,
         length_and_ng: merge_len_and_ng(data.len() as u16, ng),
@@ -72,7 +75,7 @@ pub fn send_command(
 
     trace!("> command (b): {:x?}", serial_buf);
 
-    clear_input_buffer(port);
+    clear_input_buffer(port)?;
     port.write(serial_buf.as_slice())?;
     return Ok(());
 }
