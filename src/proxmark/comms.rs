@@ -68,12 +68,12 @@ pub fn send_command(
         length_and_ng: merge_len_and_ng(data.len() as u16, ng),
         magic: COMMANDNG_PREAMBLE_MAGIC,
     };
-    debug!("> command: {:x?} data: {:x?}", command, data);
+    debug!("> command: {:x?} data: {:02x?}", command, data);
     let partly_encoded_command = bincode::serialize(&command)?;
     let postamble_vec = COMMANDNG_POSTAMBLE_MAGIC.to_le_bytes().to_vec();
     let serial_buf = vec![partly_encoded_command, data.clone(), postamble_vec].concat();
 
-    trace!("> command (b): {:x?}", serial_buf);
+    trace!("> command (b): {:02x?}", serial_buf);
 
     clear_input_buffer(port)?;
     port.write(serial_buf.as_slice())?;
@@ -111,7 +111,7 @@ fn get_response(
         trace!("Total read: {:?}", &total_read);
     }
     trace!(
-        "< response (b, {:?}): {:x?}",
+        "< response (b, {:?}): {:02x?}",
         total_read,
         &serial_buf[0..total_read]
     );
@@ -123,7 +123,7 @@ fn get_response(
         map_mix_to_packet_response(serial_buf, data_length, sent_cmd)
     };
 
-    debug!("< response: {:x?}", response);
+    debug!("< response: {:02x?}", response);
 
     return Ok(response);
 }
@@ -131,13 +131,21 @@ fn get_response(
 fn map_ng_to_packet_response(
     serial_buf: Vec<u8>,
     data_length: u16,
-    _sent_cmd: Command,
+    sent_cmd: Command,
 ) -> PM3PacketResponseNG {
-    let data_offset = mem::size_of::<PM3PacketResponseNGInternal>();
+    let mut data_length = data_length;
+    let mut data_offset = mem::size_of::<PM3PacketResponseNGInternal>();
     let partial_response: PM3PacketResponseNGInternal = bincode::deserialize(&serial_buf).unwrap();
     assert!(partial_response.magic == RESPONSENG_PREAMBLE_MAGIC);
 
-    trace!("< partial_response: {:x?}", partial_response);
+    trace!("< partial_response: {:02x?}", partial_response);
+
+    // This is only here (not in MIX) because 14b is an NG command only.
+    if sent_cmd == Command::HfIso14443BCommand {
+        // response_byte (u8) + datalen (u16 LE)
+        data_offset += 3;
+        data_length -= 3;
+    }
 
     let data_end = data_offset + data_length as usize;
     let data = serial_buf[data_offset..data_end].to_vec();
@@ -166,7 +174,7 @@ fn map_mix_to_packet_response(
     let partial_response: PM3PacketResponseMIXInternal = bincode::deserialize(&serial_buf).unwrap();
     assert!(partial_response.magic == RESPONSENG_PREAMBLE_MAGIC);
 
-    trace!("< partial_response: {:x?}", partial_response);
+    trace!("< partial_response: {:02x?}", partial_response);
 
     // - 24 here as 3x u64s for the args
     let actual_data_length: u16 = match sent_cmd {

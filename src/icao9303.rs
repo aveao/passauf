@@ -133,7 +133,7 @@ pub fn calculate_bac_eifd_and_mifd(
 
     // Concatinate RND.IFD, RND.IC and K.IFD into S (shared secret)
     let shared_secret = vec![rnd_ifd, rnd_ic, k_ifd].concat();
-    debug!("shared_secret: {:?}", shared_secret);
+    debug!("shared_secret: {:02x?}", shared_secret);
 
     // Concatinate MRZ with added check digits for key formation.
     let k_mrz = vec![
@@ -142,7 +142,7 @@ pub fn calculate_bac_eifd_and_mifd(
         append_check_digit(date_of_expiry).as_bytes(),
     ]
     .concat();
-    debug!("K.mrz: {:?}", k_mrz);
+    debug!("K.mrz: {:02x?}", k_mrz);
 
     // Calculate the seed for the key
     sha1_hasher.update(k_mrz.as_slice());
@@ -151,12 +151,12 @@ pub fn calculate_bac_eifd_and_mifd(
     // Derive keys K.enc and K.mac
     let k_enc = kdf_sha1(k_seed, 1);
     let k_mac = kdf_sha1(k_seed, 2);
-    debug!("K.enc: {:?}", k_enc);
-    debug!("K.mac: {:?}", k_mac);
+    debug!("K.enc: {:02x?}", k_enc);
+    debug!("K.mac: {:02x?}", k_mac);
 
     // Calculate E.IFD = E(KEnc, S)
     let e_ifd = tdes_enc(k_enc.as_slice(), &shared_secret);
-    debug!("E.ifd: {:?}", e_ifd);
+    debug!("E.ifd: {:02x?}", e_ifd);
 
     // Calculate M.IFD = MAC(K.MAC, E.IFD)
     // Here we use Retail Mac (ISO 9797-1 MAC format 3) with Padding Method 2
@@ -164,7 +164,7 @@ pub fn calculate_bac_eifd_and_mifd(
     // let mut rmac_instance = RetailMacDes::new_from_slice(k_mac.as_slice()).unwrap();
     // rmac_instance.update(padding_method_2(&e_ifd).as_slice());
     // let m_ifd = rmac_instance.finalize().as_bytes().to_vec();
-    debug!("M.ifd: {:?}", m_ifd);
+    debug!("M.ifd: {:02x?}", m_ifd);
 
     return (k_enc, e_ifd, m_ifd);
 }

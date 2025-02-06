@@ -21,6 +21,7 @@ pub enum Command {
     Ack = 0x00ff,
     HfDropfield = 0x0430,
     HfIso14443AReader = 0x0385,
+    HfIso14443BCommand = 0x0305,
 }
 
 #[derive(Serialize, Debug)]
