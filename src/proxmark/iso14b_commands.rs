@@ -1,7 +1,7 @@
 use super::comms::send_and_get_command;
 use super::types::{Command, PM3PacketResponseNG, Status};
 use bitflags::bitflags;
-use log::debug;
+use simplelog::debug;
 
 bitflags! {
     #[derive(Debug)]

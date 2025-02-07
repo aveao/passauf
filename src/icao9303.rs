@@ -2,13 +2,12 @@ use cbc::cipher::{
     inout::block_padding, inout::block_padding::RawPadding, BlockModeDecrypt, BlockModeEncrypt,
     KeyInit, KeyIvInit,
 };
-use iso7816_tlv::ber;
 use phf::phf_map;
 use retail_mac::{Mac, RetailMac};
 use sha1::{Digest, Sha1};
 use simplelog::{debug, info};
 
-use crate::helpers;
+use crate::dg_parsers;
 use crate::types;
 
 const TDES_IV: [u8; 8] = [0x00u8; 8];
@@ -229,121 +228,28 @@ pub fn calculate_initial_ssc_bac(rnd_ic: &[u8], rnd_ifd: &[u8]) -> u64 {
     return u64::from_be_bytes(ssc_bytes.try_into().unwrap());
 }
 
-fn generic_parser(
-    data: Vec<u8>,
-    data_group: &DataGroup,
-    _print_data: bool,
-) -> Option<types::ParsedDataGroup> {
-    info!("Read file ({:?}b): {:x?}", data.len(), data);
-    return None;
-}
-
-fn generic_parser_asn1(
-    data: Vec<u8>,
-    data_group: &DataGroup,
-    _print_data: bool,
-) -> Option<types::ParsedDataGroup> {
-    info!("Read file ({:?}b): {:x?}", data.len(), data);
-    return None;
-}
-
-fn cardaccess_parser(
-    data: Vec<u8>,
-    data_group: &DataGroup,
-    _print_data: bool,
-) -> Option<types::ParsedDataGroup> {
-    info!("Read EF.CardAccess ({:?}b): {:x?}", data.len(), data);
-    return None;
-}
-
-fn ef_com_parser(
-    data: Vec<u8>,
-    data_group: &DataGroup,
-    print_data: bool,
-) -> Option<types::ParsedDataGroup> {
-    info!("Read EF.COM ({:?}b): {:x?}", data.len(), data);
-
-    // Parse the base TLV
-    let base_tlv = ber::Tlv::parse(&data).0.unwrap();
-    assert!(helpers::get_tlv_tag(&base_tlv) == 0x60);
-    debug!("base_tlv: {:02x?}", &base_tlv);
-
-    // Get the TLVs stored inside the base tag and sort them by tag number
-    let base_tlv_value = helpers::get_tlv_constructed_value(&base_tlv);
-    let tlvs = helpers::sort_tlvs_by_tag(&base_tlv_value);
-    debug!("tlvs: {:02x?}", tlvs);
-
-    // Deserialize the EFCom file from the given TLV data.
-    let efcom_file = types::EFCom {
-        lds_version: match tlvs.get(&0x5F01) {
-            Some(data) => {
-                let value_bytes = helpers::get_tlv_value_bytes(data);
-                assert!(value_bytes.len() == 4);
-                Some(value_bytes.try_into().unwrap())
-            }
-            None => None,
-        },
-        unicode_version: match tlvs.get(&0x5F36) {
-            Some(data) => {
-                let mut value_bytes = helpers::get_tlv_value_bytes(data);
-                assert!(value_bytes.len() == 6);
-                // Add dots to the unicode version string.
-                value_bytes.insert(4, b'.');
-                value_bytes.insert(2, b'.');
-                Some(String::from_utf8(value_bytes).unwrap())
-            }
-            None => None,
-        },
-        data_group_tag_list: helpers::get_tlv_value_bytes(tlvs.get(&0x5C).unwrap()),
-    };
-    if print_data {
-        info!("------------------------ <b>EF_COM</b> ------------------------");
-        info!("({})", data_group.description);
-        if efcom_file.lds_version != None {
-            info!(
-                "<b>LDS Version:</b> {:02x?}",
-                &efcom_file.lds_version.unwrap()
-            )
-        };
-        if efcom_file.unicode_version != None {
-            info!(
-                "<b>Unicode Version:</b> {:02x?}",
-                &efcom_file.unicode_version.clone().unwrap()
-            )
-        };
-        info!("<b>Files on this document:</b>");
-
-        for (_, (dg_name, dg_info)) in DATA_GROUPS.entries.iter().enumerate() {
-            if efcom_file.data_group_tag_list.contains(&dg_info.tag) {
-                info!("<b>{}</b>: {}", dg_name, dg_info.description)
-            }
-        }
-    }
-    return Some(types::ParsedDataGroup::EFCom(efcom_file));
-}
-
 pub static AID_MRTD_LDS1: [u8; 7] = [0xA0, 0x00, 0x00, 0x02, 0x47, 0x10, 0x01];
 pub static DATA_GROUPS: phf::Map<&'static str, &'static DataGroup> = phf_map! {
-    "EF.COM" => &DataGroup{tag: 0x60, dg_num: 0, file_id: 0x011E, description: "Header and Data Group Presence Information", pace_only: false, eac_only: false, in_lds1: false, parser: ef_com_parser, is_asn1: true},
-    "EF.CardAccess" => &DataGroup{tag: 0xff, dg_num: 0, file_id: 0x011C, description: "SecurityInfos (PACE)", pace_only: true, eac_only: false, in_lds1: false, parser: cardaccess_parser, is_asn1: true},
-    "EF.CardSecurity" => &DataGroup{tag: 0xff, dg_num: 0, file_id: 0x011D, description: "SecurityInfos for Chip Authentication Mapping (PACE)", pace_only: true, eac_only: false, in_lds1: false, parser: generic_parser, is_asn1: true},
-    "EF.ATR/INFO" => &DataGroup{tag: 0xff, dg_num: 0, file_id: 0x2F01, description: "Answer to Reset File", pace_only: false, eac_only: false, in_lds1: false, parser: generic_parser, is_asn1: false},
-    "EF.DIR" => &DataGroup{tag: 0xff, dg_num: 0, file_id: 0x2F00, description: "Directory", pace_only: false, eac_only: false, in_lds1: false, parser: generic_parser_asn1, is_asn1: true},
-    "EF.DG1" => &DataGroup{tag: 0x61, dg_num: 1, file_id: 0x0101, description: "Details recorded in MRZ", pace_only: false, eac_only: false, in_lds1: true, parser: generic_parser, is_asn1: true},
-    "EF.DG2" => &DataGroup{tag: 0x75, dg_num: 2, file_id: 0x0102, description: "Encoded Face", pace_only: false, eac_only: false, in_lds1: true, parser: generic_parser, is_asn1: true},
-    "EF.DG3" => &DataGroup{tag: 0x63, dg_num: 3, file_id: 0x0103, description: "Encoded Finger(s)", pace_only: false, eac_only: true, in_lds1: true, parser: generic_parser, is_asn1: true},
-    "EF.DG4" => &DataGroup{tag: 0x76, dg_num: 4, file_id: 0x0104, description: "Encoded Eye(s)", pace_only: false, eac_only: true, in_lds1: true, parser: generic_parser, is_asn1: true},
-    "EF.DG5" => &DataGroup{tag: 0x65, dg_num: 5, file_id: 0x0105, description: "Displayed Portrait", pace_only: false, eac_only: false, in_lds1: true, parser: generic_parser, is_asn1: true},
-    "EF.DG6" => &DataGroup{tag: 0x66, dg_num: 6, file_id: 0x0106, description: "Reserved for Future Use", pace_only: false, eac_only: false, in_lds1: true, parser: generic_parser, is_asn1: true},
-    "EF.DG7" => &DataGroup{tag: 0x67, dg_num: 7, file_id: 0x0107, description: "Displayed Signature or Usual Mark", pace_only: false, eac_only: false, in_lds1: true, parser: generic_parser, is_asn1: true},
-    "EF.DG8" => &DataGroup{tag: 0x68, dg_num: 8, file_id: 0x0108, description: "Data Feature(s)", pace_only: false, eac_only: false, in_lds1: true, parser: generic_parser, is_asn1: true},
-    "EF.DG9" => &DataGroup{tag: 0x69, dg_num: 9, file_id: 0x0109, description: "Structure Feature(s)", pace_only: false, eac_only: false, in_lds1: true, parser: generic_parser, is_asn1: true},
-    "EF.DG10" => &DataGroup{tag: 0x6a, dg_num: 10, file_id: 0x010A, description: "Substance Feature(s)", pace_only: false, eac_only: false, in_lds1: true, parser: generic_parser, is_asn1: true},
-    "EF.DG11" => &DataGroup{tag: 0x6b, dg_num: 11, file_id: 0x010B, description: "Additional Personal Detail(s)", pace_only: false, eac_only: false, in_lds1: true, parser: generic_parser, is_asn1: true},
-    "EF.DG12" => &DataGroup{tag: 0x6c, dg_num: 12, file_id: 0x010C, description: "Additional Document Detail(s)", pace_only: false, eac_only: false, in_lds1: true, parser: generic_parser, is_asn1: true},
-    "EF.DG13" => &DataGroup{tag: 0x6d, dg_num: 13, file_id: 0x010D, description: "Optional Detail(s)", pace_only: false, eac_only: false, in_lds1: true, parser: generic_parser, is_asn1: true},
-    "EF.DG14" => &DataGroup{tag: 0x6e, dg_num: 14, file_id: 0x010E, description: "Security Options", pace_only: false, eac_only: false, in_lds1: true, parser: generic_parser, is_asn1: true},
-    "EF.DG15" => &DataGroup{tag: 0x6f, dg_num: 15, file_id: 0x010F, description: "Active Authentication Public Key Info", pace_only: false, eac_only: false, in_lds1: true, parser: generic_parser, is_asn1: true},
-    "EF.DG16" => &DataGroup{tag: 0x70, dg_num: 16, file_id: 0x0110, description: "Person(s) to Notify", pace_only: false, eac_only: false, in_lds1: true, parser: generic_parser, is_asn1: true},
-    "EF.SOD" => &DataGroup{tag: 0x77, dg_num: 0, file_id: 0x011D, description: "Document Security Object", pace_only: false, eac_only: false, in_lds1: true, parser: generic_parser, is_asn1: true},
+    "EF.COM" => &DataGroup{tag: 0x60, dg_num: 0, file_id: 0x011E, description: "Header and Data Group Presence Information", pace_only: false, eac_only: false, in_lds1: false, parser: dg_parsers::ef_com::parser, is_asn1: true},
+    "EF.CardAccess" => &DataGroup{tag: 0xff, dg_num: 0, file_id: 0x011C, description: "SecurityInfos (PACE)", pace_only: true, eac_only: false, in_lds1: false, parser: dg_parsers::generic::parser, is_asn1: true},
+    "EF.CardSecurity" => &DataGroup{tag: 0xff, dg_num: 0, file_id: 0x011D, description: "SecurityInfos for Chip Authentication Mapping (PACE)", pace_only: true, eac_only: false, in_lds1: false, parser: dg_parsers::generic::parser, is_asn1: true},
+    "EF.ATR/INFO" => &DataGroup{tag: 0xff, dg_num: 0, file_id: 0x2F01, description: "Answer to Reset File", pace_only: false, eac_only: false, in_lds1: false, parser: dg_parsers::generic::parser, is_asn1: false},
+    "EF.DIR" => &DataGroup{tag: 0xff, dg_num: 0, file_id: 0x2F00, description: "Directory", pace_only: false, eac_only: false, in_lds1: false, parser: dg_parsers::generic::parser, is_asn1: true},
+    "EF.DG1" => &DataGroup{tag: 0x61, dg_num: 1, file_id: 0x0101, description: "Details recorded in MRZ", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_asn1: true},
+    "EF.DG2" => &DataGroup{tag: 0x75, dg_num: 2, file_id: 0x0102, description: "Encoded Face", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_asn1: true},
+    "EF.DG3" => &DataGroup{tag: 0x63, dg_num: 3, file_id: 0x0103, description: "Encoded Finger(s)", pace_only: false, eac_only: true, in_lds1: true, parser: dg_parsers::generic::parser, is_asn1: true},
+    "EF.DG4" => &DataGroup{tag: 0x76, dg_num: 4, file_id: 0x0104, description: "Encoded Eye(s)", pace_only: false, eac_only: true, in_lds1: true, parser: dg_parsers::generic::parser, is_asn1: true},
+    "EF.DG5" => &DataGroup{tag: 0x65, dg_num: 5, file_id: 0x0105, description: "Displayed Portrait", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_asn1: true},
+    "EF.DG6" => &DataGroup{tag: 0x66, dg_num: 6, file_id: 0x0106, description: "Reserved for Future Use", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_asn1: true},
+    "EF.DG7" => &DataGroup{tag: 0x67, dg_num: 7, file_id: 0x0107, description: "Displayed Signature or Usual Mark", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_asn1: true},
+    "EF.DG8" => &DataGroup{tag: 0x68, dg_num: 8, file_id: 0x0108, description: "Data Feature(s)", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_asn1: true},
+    "EF.DG9" => &DataGroup{tag: 0x69, dg_num: 9, file_id: 0x0109, description: "Structure Feature(s)", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_asn1: true},
+    "EF.DG10" => &DataGroup{tag: 0x6a, dg_num: 10, file_id: 0x010A, description: "Substance Feature(s)", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_asn1: true},
+    "EF.DG11" => &DataGroup{tag: 0x6b, dg_num: 11, file_id: 0x010B, description: "Additional Personal Detail(s)", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_asn1: true},
+    "EF.DG12" => &DataGroup{tag: 0x6c, dg_num: 12, file_id: 0x010C, description: "Additional Document Detail(s)", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_asn1: true},
+    "EF.DG13" => &DataGroup{tag: 0x6d, dg_num: 13, file_id: 0x010D, description: "Optional Detail(s)", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_asn1: true},
+    "EF.DG14" => &DataGroup{tag: 0x6e, dg_num: 14, file_id: 0x010E, description: "Security Options", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_asn1: true},
+    "EF.DG15" => &DataGroup{tag: 0x6f, dg_num: 15, file_id: 0x010F, description: "Active Authentication Public Key Info", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_asn1: true},
+    "EF.DG16" => &DataGroup{tag: 0x70, dg_num: 16, file_id: 0x0110, description: "Person(s) to Notify", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_asn1: true},
+    "EF.SOD" => &DataGroup{tag: 0x77, dg_num: 0, file_id: 0x011D, description: "Document Security Object", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_asn1: true},
 };

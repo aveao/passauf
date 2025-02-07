@@ -5,8 +5,8 @@ use super::types::{
 };
 use bincode;
 use core::mem;
-use log::{debug, trace, warn};
 use serialport;
+use simplelog::{debug, trace, warn};
 use std::str;
 use std::time::Duration;
 

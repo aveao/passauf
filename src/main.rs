@@ -1,12 +1,13 @@
+mod dg_parsers;
 mod helpers;
 mod icao9303;
 mod iso7816;
 #[cfg(feature = "proxmark")]
 mod proxmark;
 mod types;
-use log::{info, warn};
+
 use rand::Rng;
-use simplelog::{CombinedLogger, TermLogger};
+use simplelog::{info, warn, CombinedLogger, TermLogger};
 use std::env;
 
 fn do_bac_authentication(

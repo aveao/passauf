@@ -3,7 +3,7 @@ use crate::iso7816;
 use crate::proxmark;
 use iso7816::StatusCode;
 use iso7816_tlv::ber;
-use log::{debug, info, warn};
+use simplelog::{debug, info, warn};
 use std::cmp::{max, min};
 use std::collections::HashMap;
 

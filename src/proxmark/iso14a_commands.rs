@@ -1,9 +1,8 @@
-use bitflags::bitflags;
-// use super::helpers::{convert_mix_args_to_ng, send_and_get_command};
 use super::base_commands;
 use super::comms::send_and_get_command;
 use super::helpers::convert_mix_args_to_ng;
 use super::types::{Command, PM3PacketResponseNG, Status};
+use bitflags::bitflags;
 
 bitflags! {
     #[derive(Debug)]

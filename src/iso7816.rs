@@ -1,7 +1,6 @@
 ///! ISO 7816 APDU handlers (for ICAO 9303 only)
 use iso7816_tlv::ber;
-use log::{debug, error, trace};
-use std::collections::HashMap;
+use simplelog::{debug, error, trace};
 use strum::{FromRepr, IntoStaticStr};
 
 use crate::helpers;
