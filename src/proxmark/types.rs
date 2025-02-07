@@ -29,6 +29,8 @@ pub(crate) struct PM3PacketCommandInternal {
     pub magic: u32,
     pub length_and_ng: u16, // length is 15b, ng is 1b
     pub cmd: u16,
+    // data: Vec<u8>,
+    // postamble: u16,
 }
 
 #[derive(Deserialize, Debug)]
@@ -43,6 +45,8 @@ pub(crate) struct PM3PacketResponseMIXInternal {
     pub arg0: u64,
     pub arg1: u64,
     pub arg2: u64,
+    // data: Vec<u8>,
+    // postamble: u16,
 }
 
 #[derive(Deserialize, Debug)]
@@ -54,6 +58,8 @@ pub(crate) struct PM3PacketResponseNGInternal {
     pub status: i8,
     pub reason: i8,
     pub cmd: u16,
+    // data: Vec<u8>,
+    // postamble: u16,
 }
 
 #[derive(Debug)]

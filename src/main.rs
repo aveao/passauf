@@ -125,8 +125,7 @@ fn main() {
     let (_, status_code) = helpers::exchange_apdu(&mut port, &mut apdu, true);
     assert!(status_code == iso7816::StatusCode::Ok as u16);
 
-    // Authenticate with BAC.
-    // TODO: if we have PACE, we should use that instead.
+    // Authenticate
     let (ks_enc, ks_mac, mut ssc) =
         do_authentication(pace_available, &mut port, &args[2], &args[3], &args[4]);
 

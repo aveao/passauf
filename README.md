@@ -62,7 +62,9 @@ Here's the list of features I plan to support (checkmarks indicate if it is impl
     - [ ] Support for parsing ATS and ATR for determining a higher timeout
     - [x] Helper function for selecting a card (`pm3_14a_select`)
     - [x] Helper function for exchanging APDUs (`pm3_exchange_apdu_14a`)
-- [ ] ISO/IEC 14443b support (`CMD_HF_ISO14443B_COMMAND`?)
+- [x] ISO/IEC 14443b support (`CMD_HF_ISO14443B_COMMAND`)
+    - [x] Adjacent helper functions
+    - [ ] Ability to select cards via different selection methods
 - [ ] Some sort of way to automatically detect 14a vs 14b?
 - [ ] Support for `CMD_WTX` (wait time extension)
     - Unclear if this is necessary for this project, but it seems useful to have.

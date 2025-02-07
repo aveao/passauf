@@ -109,12 +109,17 @@ impl ApduCommand {
     ) -> Vec<u8> {
         // Command APDU: [DO‘85’ or DO‘87’] [DO‘97’] DO‘8E’.
         // Relevant for BER-TLV: ISO 7816-4-2020+A1-2023: 10.2.3, Table 50 and surroundings
+        // TODO: Consider moving the BER-TLV handling to any existing library.
+
+        // ICAO 9303 p11: "The command header MUST be included in the MAC calculation,
+        // therefore the class byte CLA = 0x0C MUST be used."
+        // Here we're masking the class byte with 0x0C, which is the proper approach.
+        // We only ever use CLA=0x00 so we could hardcode this to 0x0C, but I want to be thorough.
+        let cla = self.cla | 0x0C;
 
         // Le: length of expected response
         let base_le = Self::get_field_len_vec(self.max_resp_len);
-        // ICAO 9303 p11: "The command header MUST be included in the MAC calculation,
-        // therefore the class byte CLA = 0x0C MUST be used."
-        let cmd = vec![0x0C, self.ins, self.p1, self.p2];
+        let cmd = vec![cla, self.ins, self.p1, self.p2];
         let padded_cmd = icao9303::padding_method_2(&cmd);
         debug!("padded_cmd: {:02x?}", padded_cmd);
 
@@ -124,16 +129,19 @@ impl ApduCommand {
         if !self.data.is_empty() {
             let padded_data = icao9303::padding_method_2(&self.data);
             debug!("padded_data: {:02x?}", padded_data);
-            let encrypted_data = icao9303::tdes_enc(ks_enc, &padded_data);
-            debug!("encrypted_data: {:02x?}", encrypted_data);
 
-            // ICAO 9303 p11: "In case INS is even, DO‘87’ SHALL be used,
-            // and in case INS is odd, DO‘85’ SHALL be used."
-            // However, BSI TR-03110 does not use DO'85' at all.
-            // Generally, '87' may be enough.
+            // ICAO 9303 p11: "In case INS is even, DO‘87’ SHALL be used, and in case INS is odd, DO‘85’ SHALL be used."
+            // BSI TR-03110 does not use DO'85' at all.
+            // ISO 7816-4-2020+A1-2023: "When bit b1 of INS is set to 1 (odd INS code, see 5.5), the unsecured data
+            // fields are encoded in ber-tlv and SM tags 'B2', 'B3', '84' and '85' shall be used for their encapsulation;
+            // unless the use of tags '80', '81', '86' and '87' is specified at application level."
+            // Only very few commands in ISO 7816-4 have odd INS numbers.
+            // In this context we only use even commands so far, so having only DO'87' may be enough.
 
-            // if instruction is an even number
+            // If instruction is an even number
             if self.ins % 2 == 0 {
+                let encrypted_data = icao9303::tdes_enc(ks_enc, &padded_data);
+                debug!("encrypted_data: {:02x?}", encrypted_data);
                 // (T)ag is 0x87, "Padding-content indicator byte followed by cryptogram".
                 // (L)ength is determined dynamically, the +1 is due to the padding-content indicator byte.
                 // (V)alue in DO'87' is data prepended with the Padding-content indicator byte.
@@ -148,10 +156,10 @@ impl ApduCommand {
                 .concat();
                 debug!("do_87_tlv: {:02x?}", do_87_tlv);
                 secure_data.extend_from_slice(do_87_tlv.as_slice());
-            // if instruction is an odd number
+            // If instruction is an odd number
             } else {
                 // (T)ag is 0x85, "Cryptogram (plain value encoded in ber-tlv, but not including SM DOs)".
-                panic!("DO85 is not implemented.");
+                panic!("DO'85' is not implemented.");
             }
         }
 

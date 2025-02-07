@@ -84,6 +84,10 @@ pub fn kdf_sha1(shared_secret: &[u8], counter: u32) -> Vec<u8> {
 ///
 /// Takes the data and returns it with the appropriate padding.
 pub fn padding_method_2(input: &Vec<u8>) -> Vec<u8> {
+    // block_padding::Iso7816 is pretty close to this, but it has one key difference:
+    // This function adds a full block of padding when data is block size-aligned.
+    // block_padding::Iso7816, however, does not. IME, this can make or break the comms.
+
     let padding = [0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
     // This assumes a block size of 8 bytes.
     let padding_to_append = 8 - (input.len() % 8);
