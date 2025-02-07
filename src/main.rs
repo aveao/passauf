@@ -131,6 +131,7 @@ fn main() {
 
     let file_data =
         helpers::secure_select_and_read_file(&mut port, "EF.COM", true, &mut ssc, &ks_enc, &ks_mac);
+    info!("EF_COM: {:02x?}", file_data);
 
     // read all the rest of files
 

@@ -1,5 +1,8 @@
 // use crate::types;
-use cbc::cipher::{inout::block_padding, BlockModeDecrypt, BlockModeEncrypt, KeyInit, KeyIvInit};
+use cbc::cipher::{
+    inout::block_padding, inout::block_padding::RawPadding, BlockModeDecrypt, BlockModeEncrypt,
+    KeyInit, KeyIvInit,
+};
 use log::{debug, info};
 use phf::phf_map;
 use retail_mac::{Mac, RetailMac};
@@ -82,8 +85,8 @@ pub fn kdf_sha1(shared_secret: &[u8], counter: u32) -> Vec<u8> {
 
 /// Applies Padding Method 2 based on ISO 9797-1.
 ///
-/// Takes the data and returns it with the appropriate padding.
-pub fn padding_method_2(input: &Vec<u8>) -> Vec<u8> {
+/// Takes the data and returns a new Vec with the appropriate padding.
+pub fn padding_method_2_pad(input: &Vec<u8>) -> Vec<u8> {
     // block_padding::Iso7816 is pretty close to this, but it has one key difference:
     // This function adds a full block of padding when data is block size-aligned.
     // block_padding::Iso7816, however, does not. IME, this can make or break the comms.
@@ -92,6 +95,13 @@ pub fn padding_method_2(input: &Vec<u8>) -> Vec<u8> {
     // This assumes a block size of 8 bytes.
     let padding_to_append = 8 - (input.len() % 8);
     return vec![input.as_slice(), &padding[0..padding_to_append]].concat();
+}
+
+/// Undoes Padding Method 2 based on ISO 9797-1.
+///
+/// Takes the data and returns a new Vec without the padding.
+pub fn padding_method_2_unpad(input: &Vec<u8>) -> Vec<u8> {
+    return block_padding::Iso7816::raw_unpad(input).unwrap().to_vec();
 }
 
 /// Applies Retail Mac based on ISO 9797-1.
@@ -172,10 +182,7 @@ pub fn calculate_bac_eifd_and_mifd(
 
     // Calculate M.IFD = MAC(K.MAC, E.IFD)
     // Here we use Retail Mac (ISO 9797-1 MAC format 3) with Padding Method 2
-    let m_ifd = retail_mac(&k_mac, &padding_method_2(&e_ifd));
-    // let mut rmac_instance = RetailMacDes::new_from_slice(k_mac.as_slice()).unwrap();
-    // rmac_instance.update(padding_method_2(&e_ifd).as_slice());
-    // let m_ifd = rmac_instance.finalize().as_bytes().to_vec();
+    let m_ifd = retail_mac(&k_mac, &padding_method_2_pad(&e_ifd));
     debug!("M.ifd: {:02x?}", m_ifd);
 
     return (k_enc, e_ifd, m_ifd);

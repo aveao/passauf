@@ -122,14 +122,14 @@ impl ApduCommand {
         // Le: length of expected response
         let base_le = Self::get_field_len_vec(self.max_resp_len);
         let cmd = vec![cla, self.ins, self.p1, self.p2];
-        let padded_cmd = icao9303::padding_method_2(&cmd);
+        let padded_cmd = icao9303::padding_method_2_pad(&cmd);
         debug!("padded_cmd: {:02x?}", padded_cmd);
 
         // Padded Command + Data as BER-TLV (if set) + Padded Response Length as BER-TLV (if set) + MAC
         let mut secure_data: Vec<u8> = vec![];
 
         if !self.data.is_empty() {
-            let padded_data = icao9303::padding_method_2(&self.data);
+            let padded_data = icao9303::padding_method_2_pad(&self.data);
             debug!("padded_data: {:02x?}", padded_data);
 
             // ICAO 9303 p11: "In case INS is even, DO‘87’ SHALL be used, and in case INS is odd, DO‘85’ SHALL be used."
@@ -175,7 +175,7 @@ impl ApduCommand {
 
         // Pad secure data so far with Padding Method 2
         debug!("unpadded secure_data: {:02x?}", secure_data);
-        let padded_secure_data = icao9303::padding_method_2(
+        let padded_secure_data = icao9303::padding_method_2_pad(
             &vec![
                 ssc.to_be_bytes().as_slice(),
                 padded_cmd.as_slice(),
@@ -248,7 +248,7 @@ pub fn parse_secure_rapdu(
             None => {}
         }
     }
-    signature_check_data = icao9303::padding_method_2(&signature_check_data);
+    signature_check_data = icao9303::padding_method_2_pad(&signature_check_data);
     debug!("signature_check_data: {:02x?}", signature_check_data);
 
     // Calculate the MAC for the data we received
@@ -266,11 +266,14 @@ pub fn parse_secure_rapdu(
         let do_87_tlv = rapdu_tlvs.get(&0x87).unwrap();
         let mut do_87_value = helpers::get_tlv_value(do_87_tlv.to_owned());
         // We skip first byte due to it being the "Padding-content indicator byte".
+        // ICAO 9303 only allows one value, so we don't need to think much about it.
         do_87_value = do_87_value[1..].to_vec();
         debug!("do_87_value: {:02x?}", do_87_value);
         let decrypted_data = icao9303::tdes_dec(ks_enc, &do_87_value);
         debug!("decrypted_data: {:02x?}", decrypted_data);
-        return Some(decrypted_data);
+        let decrypted_unpadded_data = icao9303::padding_method_2_unpad(&decrypted_data);
+        debug!("decrypted_unpadded_data: {:02x?}", decrypted_unpadded_data);
+        return Some(decrypted_unpadded_data);
     }
 
     return None;
