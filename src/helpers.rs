@@ -66,7 +66,7 @@ pub fn secure_exchange_apdu(
     let mut done_exchanging = false;
     // initializing with an empty response here so that compiler doesn't complain
     let mut response = proxmark::PM3PacketResponseNG::empty();
-    let mut secure_apdu_data: Vec<u8> = vec![];
+    let mut apdu_data: Vec<u8> = vec![];
     while !done_exchanging {
         debug!("> APDU (secure: {:?}): {:x?}", secure_comms, apdu);
         let apdu_bytes = if secure_comms {
@@ -77,19 +77,21 @@ pub fn secure_exchange_apdu(
         response = proxmark::exchange_apdu_14a(port, &apdu_bytes, false).unwrap();
         let status_code_bytes = iso7816::get_status_code_bytes(&response.data);
 
+        // - 4 bytes for status code and and hash
         if secure_comms {
-            // - 4 bytes for status code and and hash
             match iso7816::parse_secure_rapdu(
                 &response.data[..response.data.len() - 4],
                 ssc,
                 ks_enc,
                 ks_mac,
             ) {
-                Some(apdu_data) => {
-                    secure_apdu_data = apdu_data;
+                Some(data) => {
+                    apdu_data = data;
                 }
                 None => {}
             };
+        } else {
+            apdu_data = response.data[..response.data.len() - 4].to_vec();
         }
 
         // ISO/IEC 7816-4 says:
@@ -116,7 +118,7 @@ pub fn secure_exchange_apdu(
         assert!(status_code == StatusCode::Ok as u16);
     }
 
-    return (response, secure_apdu_data, status_code);
+    return (response, apdu_data, status_code);
 }
 
 pub fn select_and_read_file(
@@ -147,35 +149,32 @@ pub fn secure_select_and_read_file(
     }
 
     info!("Reading {} ({})", filename, dg_info.description);
-    let mut data: Vec<u8> = vec![];
+    let mut total_data: Vec<u8> = vec![];
     let mut bytes_to_read = 0x05;
-    let mut total_len: u16 = 0;
+    let mut file_len: u16 = 0;
     while bytes_to_read > 0 {
-        let mut apdu = iso7816::apdu_read_binary(data.len() as u16, bytes_to_read);
-        let (response, secure_data, status_code) =
+        let mut apdu = iso7816::apdu_read_binary(total_data.len() as u16, bytes_to_read);
+        let (_, apdu_data, status_code) =
             secure_exchange_apdu(port, &mut apdu, false, secure_comms, ssc, ks_enc, ks_mac);
-        // TODO: use secure_data
         let status_code_bytes = status_code.to_be_bytes();
-        // - 4 bytes for status code and and hash
-        let read_byte_count = response.data.len() - 4;
 
         // Unfortunately, ICAO 9303 does not allow us to read file sizes.
         // We must, therefore, read the ASN.1 header to get the size.
         // I'd love to replace this with a better solution if I find one.
-        if data.is_empty() && status_code_bytes[0] == 0x90 {
+        if total_data.is_empty() && status_code_bytes[0] == 0x90 {
             // TODO: this does not account for non-ASN1 files. We can use .is_asn1.
-            let (field_len, asn1_len) = asn1_parse_len(response.data[1..].to_vec());
+            let (field_len, asn1_len) = asn1_parse_len(apdu_data[1..].to_vec());
             // TODO: rethink this u16.
             // We should account for u32 even tho its unlikely.
             // offset by 1 as we're skipping the initial tag.
-            total_len = (1u32 + field_len as u32 + asn1_len) as u16;
+            file_len = (1u32 + field_len as u32 + asn1_len) as u16;
         }
 
         debug!(
-            "Reading file, total_len: {:?} data.len(): {:?} read_byte_count: {:?}",
-            total_len,
-            data.len(),
-            read_byte_count
+            "Reading file, file_len: {:?} total_data.len(): {:?} apdu_data.len(): {:?}",
+            file_len,
+            total_data.len(),
+            apdu_data.len()
         );
 
         // ISO/IEC 7816-4 says:
@@ -184,10 +183,10 @@ pub fn secure_select_and_read_file(
         // and using SW2 (number of data bytes still available) as short Le field.
         if status_code_bytes[0] == 0x61 {
             bytes_to_read = u16::from(status_code_bytes[1]);
-        } else if (((data.len() + read_byte_count) as u16) < total_len)
+        } else if (((total_data.len() + apdu_data.len()) as u16) < file_len)
             && (status_code_bytes[0] == 0x90)
         {
-            bytes_to_read = min(0x80, total_len - (data.len() + read_byte_count) as u16);
+            bytes_to_read = min(0x80, file_len - (total_data.len() + apdu_data.len()) as u16);
         } else {
             bytes_to_read = 0;
             // if the read failed at some point, return None
@@ -197,10 +196,13 @@ pub fn secure_select_and_read_file(
             }
         }
 
-        let new_data = response.data[0..read_byte_count].to_vec();
-        data.extend(new_data);
+        total_data.extend(apdu_data);
     }
-    debug!("Read file ({:?}b): {:?}", data.len(), data);
+    debug!("Read file ({:?}b): {:?}", total_data.len(), total_data);
     // only return data if it's not empty.
-    return if data.is_empty() { None } else { Some(data) };
+    return if total_data.is_empty() {
+        None
+    } else {
+        Some(total_data)
+    };
 }
