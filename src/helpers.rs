@@ -4,7 +4,8 @@ use crate::proxmark;
 use iso7816::StatusCode;
 use iso7816_tlv::ber;
 use log::{debug, info, warn};
-use std::cmp::min;
+use std::cmp::{max, min};
+use std::collections::HashMap;
 
 pub fn asn1_parse_len(data: Vec<u8>) -> (u8, u32) {
     let result: (u8, u32) = match data[0] {
@@ -19,22 +20,55 @@ pub fn asn1_parse_len(data: Vec<u8>) -> (u8, u32) {
     return result;
 }
 
-pub fn get_tlv_value(input_tlv: &ber::Tlv) -> Vec<u8> {
+pub fn get_tlv_value_bytes(input_tlv: &ber::Tlv) -> Vec<u8> {
     match input_tlv.value() {
         ber::Value::Primitive(data) => {
             return data.clone();
         }
-        ber::Value::Constructed(tlv) => {
+        ber::Value::Constructed(tlvs) => {
             // We don't use constructed values so this is likely dead code, but alas.
             // The output can be adjusted based on the needs that may arise in the future.
             warn!(
                 "Trying to get TLV value from a constructed TLV: {:02x?}",
                 input_tlv
             );
-            assert!(tlv.len() == 1);
-            return tlv[0].to_vec();
+            assert!(tlvs.len() == 1);
+            return tlvs[0].to_vec();
         }
     }
+}
+
+pub fn get_tlv_constructed_value(input_tlv: &ber::Tlv) -> Vec<ber::Tlv> {
+    match input_tlv.value() {
+        ber::Value::Constructed(tlvs) => {
+            return tlvs.clone();
+        }
+        _ => {
+            panic!(
+                "Tried to get a constructed TLV when there is none: {:02x?}",
+                input_tlv
+            );
+        }
+    }
+}
+
+pub fn get_tlv_tag(input_tlv: &ber::Tlv) -> u16 {
+    // I'm choosing to keep this to 2 bytes for now. It can be up to 3 by the standard.
+    let tag_bytes = input_tlv.tag().to_bytes();
+    let mut padding_vec: Vec<u8> = vec![0u8; max(2 - tag_bytes.len(), 0)];
+    padding_vec.extend_from_slice(tag_bytes);
+
+    let tag_number = u16::from_be_bytes(padding_vec.try_into().unwrap());
+    return tag_number;
+}
+
+pub fn sort_tlvs_by_tag(tlvs: &Vec<ber::Tlv>) -> HashMap<u16, &ber::Tlv> {
+    let mut rapdu_tlvs: HashMap<u16, &ber::Tlv> = HashMap::new();
+    for tlv in tlvs.iter() {
+        let tag_number = get_tlv_tag(&tlv);
+        rapdu_tlvs.insert(tag_number, tlv);
+    }
+    return rapdu_tlvs;
 }
 
 pub fn exchange_apdu(

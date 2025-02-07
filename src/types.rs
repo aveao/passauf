@@ -199,3 +199,15 @@ struct ExtCardInfoData {
     pub max_sc_no: Option<u64>,
     pub env_info: Option<bool>,
 }
+
+#[derive(Debug)]
+pub struct EFCom {
+    // ICAO 9303 part 10, edition 8, 4.6.1
+    pub lds_version: Option<[u8; 4]>,
+    pub unicode_version: Option<String>,
+    pub data_group_tag_list: Vec<u8>,
+}
+
+pub enum ParsedDataGroup {
+    EFCom(EFCom),
+}

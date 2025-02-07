@@ -1,5 +1,5 @@
-use iso7816_tlv::ber;
 ///! ISO 7816 APDU handlers (for ICAO 9303 only)
+use iso7816_tlv::ber;
 use log::{debug, error, trace};
 use std::collections::HashMap;
 use strum::{FromRepr, IntoStaticStr};
@@ -219,26 +219,21 @@ pub fn parse_secure_rapdu(
     ks_enc: &Vec<u8>,
     ks_mac: &Vec<u8>,
 ) -> Option<Vec<u8>> {
-    const SIGNATURE_CHECK_CONCAT_ORDER: [u8; 2] = [0x87, 0x99];
+    const SIGNATURE_CHECK_CONCAT_ORDER: [u16; 2] = [0x87, 0x99];
     // Increment SSC when we receive a secure RAPDU
     *ssc += 1;
     debug!("post-bump ssc: {:02x?}", ssc);
     let parsed_rapdu = ber::Tlv::parse_all(rapdu);
     debug!("parsed_rapdu: {:02x?}", parsed_rapdu);
 
-    let mut rapdu_tlvs = HashMap::new();
-    for tlv in parsed_rapdu.iter() {
-        // Here we assume that each tag is u8-sized.
-        // There's no reason to believe otherwise for our usecase.
-        rapdu_tlvs.insert(tlv.tag().to_bytes()[0], tlv);
-    }
+    let rapdu_tlvs = helpers::sort_tlvs_by_tag(&parsed_rapdu);
     debug!("rapdu_tlvs: {:02x?}", rapdu_tlvs);
 
     if rapdu_tlvs.contains_key(&0x85) {
         panic!("DO'85' is not implemented.");
     }
 
-    // Concat SSC + DO'87' + [DO'99'] + padding, to compare against DO'8E'
+    // Concat SSC + [DO'87'] + DO'99' + padding, to compare against DO'8E'
     let mut signature_check_data: Vec<u8> = ssc.to_be_bytes().to_vec();
     for tlv_tag_id in SIGNATURE_CHECK_CONCAT_ORDER {
         match rapdu_tlvs.get(&tlv_tag_id) {
@@ -257,14 +252,14 @@ pub fn parse_secure_rapdu(
 
     // Extract the value of DO'8E' and compare to the MAC we calculated.
     let do_8e_tlv = rapdu_tlvs.get(&0x8E)?;
-    let do_8e_value = helpers::get_tlv_value(do_8e_tlv.to_owned());
+    let do_8e_value = helpers::get_tlv_value_bytes(do_8e_tlv.to_owned());
     assert!(signature_check_mac == do_8e_value);
 
     // Extract the value of DO'87' and return the encrypted data.
     // This assumes we don't have a DO'85' and that we always have DO'87'.
     if rapdu_tlvs.contains_key(&0x87) {
         let do_87_tlv = rapdu_tlvs.get(&0x87).unwrap();
-        let mut do_87_value = helpers::get_tlv_value(do_87_tlv.to_owned());
+        let mut do_87_value = helpers::get_tlv_value_bytes(do_87_tlv.to_owned());
         // We skip first byte due to it being the "Padding-content indicator byte".
         // ICAO 9303 only allows one value, so we don't need to think much about it.
         do_87_value = do_87_value[1..].to_vec();

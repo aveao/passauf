@@ -101,7 +101,7 @@ fn main() {
     match file_data {
         Some(file_data) => {
             pace_available = true;
-            (dg_info.parser)(file_data);
+            (dg_info.parser)(file_data, &dg_info, true);
         }
         None => warn!("PACE isn't available on this eMRTD. Will try BAC."),
     }
@@ -115,7 +115,9 @@ fn main() {
         }
         let file_data = helpers::select_and_read_file(&mut port, dg_name);
         match file_data {
-            Some(file_data) => (dg_info.parser)(file_data), // TODO: print about it
+            Some(file_data) => {
+                (dg_info.parser)(file_data, &dg_info, true);
+            }
             None => {}
         }
     }
@@ -130,8 +132,10 @@ fn main() {
         do_authentication(pace_available, &mut port, &args[2], &args[3], &args[4]);
 
     let file_data =
-        helpers::secure_select_and_read_file(&mut port, "EF.COM", true, &mut ssc, &ks_enc, &ks_mac);
-    info!("EF_COM: {:02x?}", file_data);
+        helpers::secure_select_and_read_file(&mut port, "EF.COM", true, &mut ssc, &ks_enc, &ks_mac)
+            .unwrap();
+    let dg_info = icao9303::DATA_GROUPS.get("EF.COM").unwrap();
+    (dg_info.parser)(file_data, &dg_info, true);
 
     // read all the rest of files
 
