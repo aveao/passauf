@@ -13,14 +13,15 @@ log = { version= "0.4", features = ["release_max_level_info"] }
 simplelog = { version = "0.12", features = ["paris"] }
 strum = { version = "0.26", features = ["derive"] }
 phf = { version = "0.11", features = ["macros"] }
-asn1 = "0.20.0"
-rand = "0.9.0"
-# this is pending cipher/digest release
+asn1 = "0.20"
+rand = "0.9"
+# these are pending cipher/digest release
 retail-mac = "0.1.0"
-# block-padding = { version = "0.4.0-rc.2", features = [] }
 sha1 = "0.11.0-pre.4"
 des = "0.9.0-pre.2"
 cbc = { version = "0.2.0-pre.2", features = ["alloc"] }
+# end of packages pending cipher/digest release
+iso7816-tlv = "0.4.4"
 
 [features]
 # to make development easier, all features are on by default. this will change later.

@@ -2,6 +2,7 @@ use crate::icao9303;
 use crate::iso7816;
 use crate::proxmark;
 use iso7816::StatusCode;
+use iso7816_tlv::ber;
 use log::{debug, info, warn};
 use std::cmp::min;
 
@@ -18,17 +19,22 @@ pub fn asn1_parse_len(data: Vec<u8>) -> (u8, u32) {
     return result;
 }
 
-pub fn asn1_gen_len(len: usize) -> Vec<u8> {
-    // We're casting to u32 here as we don't support bigger values.
-    let len_bytes = (len as u32).to_be_bytes();
-    let length_encoder: &[u8] = match len as u32 {
-        0..=0x7f => &[len_bytes[3]],
-        0x80..=0xff => &[0x81, len_bytes[3]],
-        0x100..=0xffff => &[0x82, len_bytes[2], len_bytes[3]],
-        0x10000..=0xffffff => &[0x83, len_bytes[1], len_bytes[2], len_bytes[3]],
-        0x1000000..=0xffffffff => &[0x84, len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]],
-    };
-    return length_encoder.to_vec();
+pub fn get_tlv_value(input_tlv: &ber::Tlv) -> Vec<u8> {
+    match input_tlv.value() {
+        ber::Value::Primitive(data) => {
+            return data.clone();
+        }
+        ber::Value::Constructed(tlv) => {
+            // We don't use constructed values so this is likely dead code, but alas.
+            // The output can be adjusted based on the needs that may arise in the future.
+            warn!(
+                "Trying to get TLV value from a constructed TLV: {:02x?}",
+                input_tlv
+            );
+            assert!(tlv.len() == 1);
+            return tlv[0].to_vec();
+        }
+    }
 }
 
 pub fn exchange_apdu(
@@ -36,7 +42,7 @@ pub fn exchange_apdu(
     apdu: &mut iso7816::ApduCommand,
     assert_on_status: bool,
 ) -> (proxmark::PM3PacketResponseNG, u16) {
-    return secure_exchange_apdu(
+    let (response, _, status_code) = secure_exchange_apdu(
         port,
         apdu,
         assert_on_status,
@@ -45,6 +51,7 @@ pub fn exchange_apdu(
         &vec![],
         &vec![],
     );
+    return (response, status_code);
 }
 
 pub fn secure_exchange_apdu(
@@ -55,10 +62,11 @@ pub fn secure_exchange_apdu(
     ssc: &mut u64,
     ks_enc: &Vec<u8>,
     ks_mac: &Vec<u8>,
-) -> (proxmark::PM3PacketResponseNG, u16) {
+) -> (proxmark::PM3PacketResponseNG, Vec<u8>, u16) {
     let mut done_exchanging = false;
     // initializing with an empty response here so that compiler doesn't complain
     let mut response = proxmark::PM3PacketResponseNG::empty();
+    let mut secure_apdu_data: Vec<u8> = vec![];
     while !done_exchanging {
         debug!("> APDU (secure: {:?}): {:x?}", secure_comms, apdu);
         let apdu_bytes = if secure_comms {
@@ -70,8 +78,18 @@ pub fn secure_exchange_apdu(
         let status_code_bytes = iso7816::get_status_code_bytes(&response.data);
 
         if secure_comms {
-            // TODO: validate response here
-            *ssc += 1;
+            // - 4 bytes for status code and and hash
+            match iso7816::parse_secure_rapdu(
+                &response.data[..response.data.len() - 4],
+                ssc,
+                ks_enc,
+                ks_mac,
+            ) {
+                Some(apdu_data) => {
+                    secure_apdu_data = apdu_data;
+                }
+                None => {}
+            };
         }
 
         // ISO/IEC 7816-4 says:
@@ -98,7 +116,7 @@ pub fn secure_exchange_apdu(
         assert!(status_code == StatusCode::Ok as u16);
     }
 
-    return (response, status_code);
+    return (response, secure_apdu_data, status_code);
 }
 
 pub fn select_and_read_file(
@@ -120,7 +138,7 @@ pub fn secure_select_and_read_file(
 
     info!("Selecting {} ({})", filename, dg_info.description);
     let mut apdu = iso7816::apdu_select_file_by_ef(dg_info.file_id);
-    let (_, status_code) =
+    let (_, _, status_code) =
         secure_exchange_apdu(port, &mut apdu, false, secure_comms, ssc, ks_enc, ks_mac);
 
     if status_code != StatusCode::Ok as u16 {
@@ -134,8 +152,9 @@ pub fn secure_select_and_read_file(
     let mut total_len: u16 = 0;
     while bytes_to_read > 0 {
         let mut apdu = iso7816::apdu_read_binary(data.len() as u16, bytes_to_read);
-        let (response, status_code) =
+        let (response, secure_data, status_code) =
             secure_exchange_apdu(port, &mut apdu, false, secure_comms, ssc, ks_enc, ks_mac);
+        // TODO: use secure_data
         let status_code_bytes = status_code.to_be_bytes();
         // - 4 bytes for status code and and hash
         let read_byte_count = response.data.len() - 4;

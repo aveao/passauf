@@ -1,5 +1,7 @@
+use iso7816_tlv::ber;
 ///! ISO 7816 APDU handlers (for ICAO 9303 only)
 use log::{debug, error, trace};
+use std::collections::HashMap;
 use strum::{FromRepr, IntoStaticStr};
 
 use crate::helpers;
@@ -142,43 +144,32 @@ impl ApduCommand {
             if self.ins % 2 == 0 {
                 let encrypted_data = icao9303::tdes_enc(ks_enc, &padded_data);
                 debug!("encrypted_data: {:02x?}", encrypted_data);
-                // (T)ag is 0x87, "Padding-content indicator byte followed by cryptogram".
-                // (L)ength is determined dynamically, the +1 is due to the padding-content indicator byte.
-                // (V)alue in DO'87' is data prepended with the Padding-content indicator byte.
+                // Tag is 0x87, "Padding-content indicator byte followed by cryptogram".
+                let tag = ber::Tag::try_from(0x87).unwrap();
+                // Value in DO'87' is data prepended with the Padding-content indicator byte.
                 // 0x01 is padding method 2 according to ISO 7816-4-2020+A1-2023, Table 53.
-                // TODO: make this not suck
-                let do_87_tlv = vec![
-                    &[0x87],
-                    helpers::asn1_gen_len(encrypted_data.len() + 1).as_slice(),
-                    &[0x01],
-                    &encrypted_data,
-                ]
-                .concat();
+                let value = vec![[0x01].as_slice(), &encrypted_data].concat();
+
+                let do_87_tlv = ber::Tlv::new(tag, ber::Value::Primitive(value)).unwrap();
                 debug!("do_87_tlv: {:02x?}", do_87_tlv);
-                secure_data.extend_from_slice(do_87_tlv.as_slice());
+                secure_data.extend_from_slice(&do_87_tlv.to_vec());
             // If instruction is an odd number
             } else {
-                // (T)ag is 0x85, "Cryptogram (plain value encoded in ber-tlv, but not including SM DOs)".
+                // Tag is 0x85, "Cryptogram (plain value encoded in ber-tlv, but not including SM DOs)".
                 panic!("DO'85' is not implemented.");
             }
         }
 
         if self.max_resp_len != 0 {
-            // (T)ag is 0x97, "One or two bytes encoding Le in the unsecured C-RP (possibly empty, see 10.5)"
-            // (V)alue is the original Le
-            let do_97_tlv = vec![
-                &[0x97],
-                helpers::asn1_gen_len(base_le.len()).as_slice(),
-                &base_le,
-            ]
-            .concat();
+            // Tag is 0x97, "One or two bytes encoding Le in the unsecured C-RP (possibly empty)"
+            let tag = ber::Tag::try_from(0x97).unwrap();
+            // Value is the original Le
+
+            let do_97_tlv = ber::Tlv::new(tag, ber::Value::Primitive(base_le.clone())).unwrap();
             debug!("do_97_tlv: {:02x?}", do_97_tlv);
-            secure_data.extend_from_slice(do_97_tlv.as_slice());
+            secure_data.extend_from_slice(&do_97_tlv.to_vec());
         }
 
-        // emrtd_bump_ssc(ssc);
-
-        debug!("pre-bump ssc: {:02x?}", ssc);
         *ssc += 1;
         debug!("post-bump ssc: {:02x?}", ssc);
 
@@ -198,16 +189,13 @@ impl ApduCommand {
         let secure_data_mac = icao9303::retail_mac(ks_mac, &padded_secure_data);
         debug!("secure_data_mac: {:02x?}", secure_data_mac);
 
-        // (T)ag is 0x97, "One or two bytes encoding Le in the unsecured C-RP (possibly empty, see 10.5)"
-        // (V)alue is the dynamic length of the MAC (should be 8 bytes)
-        let do_8e_tlv = vec![
-            &[0x8E],
-            helpers::asn1_gen_len(secure_data_mac.len()).as_slice(),
-            &secure_data_mac,
-        ]
-        .concat();
+        // Tag is 0x97, "One or two bytes encoding Le in the unsecured C-RP (possibly empty, see 10.5)"
+        let tag = ber::Tag::try_from(0x8E).unwrap();
+        // Value is the dynamic length of the MAC (should be 8 bytes)
+
+        let do_8e_tlv = ber::Tlv::new(tag, ber::Value::Primitive(secure_data_mac.clone())).unwrap();
         debug!("do_8e_tlv: {:02x?}", do_8e_tlv);
-        secure_data.extend_from_slice(do_8e_tlv.as_slice());
+        secure_data.extend_from_slice(&do_8e_tlv.to_vec());
         debug!("final secure_data: {:02x?}", secure_data);
 
         // Lc: length of data
@@ -219,6 +207,73 @@ impl ApduCommand {
         let apdu = vec![cmd, lc, secure_data, le].concat();
         return apdu;
     }
+}
+
+/// Parse a secure Response APDU
+///
+/// Currently supports DO'99' and DO'87'
+/// Returns the decrypted data from DO'87'
+pub fn parse_secure_rapdu(
+    rapdu: &[u8],
+    ssc: &mut u64,
+    ks_enc: &Vec<u8>,
+    ks_mac: &Vec<u8>,
+) -> Option<Vec<u8>> {
+    const SIGNATURE_CHECK_CONCAT_ORDER: [u8; 2] = [0x87, 0x99];
+    // Increment SSC when we receive a secure RAPDU
+    *ssc += 1;
+    debug!("post-bump ssc: {:02x?}", ssc);
+    let parsed_rapdu = ber::Tlv::parse_all(rapdu);
+    debug!("parsed_rapdu: {:02x?}", parsed_rapdu);
+
+    let mut rapdu_tlvs = HashMap::new();
+    for tlv in parsed_rapdu.iter() {
+        // Here we assume that each tag is u8-sized.
+        // There's no reason to believe otherwise for our usecase.
+        rapdu_tlvs.insert(tlv.tag().to_bytes()[0], tlv);
+    }
+    debug!("rapdu_tlvs: {:02x?}", rapdu_tlvs);
+
+    if rapdu_tlvs.contains_key(&0x85) {
+        panic!("DO'85' is not implemented.");
+    }
+
+    // Concat SSC + DO'87' + [DO'99'] + padding, to compare against DO'8E'
+    let mut signature_check_data: Vec<u8> = ssc.to_be_bytes().to_vec();
+    for tlv_tag_id in SIGNATURE_CHECK_CONCAT_ORDER {
+        match rapdu_tlvs.get(&tlv_tag_id) {
+            Some(tlv) => {
+                signature_check_data.extend_from_slice(&tlv.to_vec());
+            }
+            None => {}
+        }
+    }
+    signature_check_data = icao9303::padding_method_2(&signature_check_data);
+    debug!("signature_check_data: {:02x?}", signature_check_data);
+
+    // Calculate the MAC for the data we received
+    let signature_check_mac = icao9303::retail_mac(ks_mac, &signature_check_data);
+    debug!("signature_check_mac: {:02x?}", signature_check_mac);
+
+    // Extract the value of DO'8E' and compare to the MAC we calculated.
+    let do_8e_tlv = rapdu_tlvs.get(&0x8E)?;
+    let do_8e_value = helpers::get_tlv_value(do_8e_tlv.to_owned());
+    assert!(signature_check_mac == do_8e_value);
+
+    // Extract the value of DO'87' and return the encrypted data.
+    // This assumes we don't have a DO'85' and that we always have DO'87'.
+    if rapdu_tlvs.contains_key(&0x87) {
+        let do_87_tlv = rapdu_tlvs.get(&0x87).unwrap();
+        let mut do_87_value = helpers::get_tlv_value(do_87_tlv.to_owned());
+        // We skip first byte due to it being the "Padding-content indicator byte".
+        do_87_value = do_87_value[1..].to_vec();
+        debug!("do_87_value: {:02x?}", do_87_value);
+        let decrypted_data = icao9303::tdes_dec(ks_enc, &do_87_value);
+        debug!("decrypted_data: {:02x?}", decrypted_data);
+        return Some(decrypted_data);
+    }
+
+    return None;
 }
 
 pub const P1_SELECT_BY_EF: u8 = 0x02;

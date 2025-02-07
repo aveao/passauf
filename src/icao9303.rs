@@ -106,10 +106,18 @@ pub fn retail_mac(k_mac: &[u8], input_data: &Vec<u8>) -> Vec<u8> {
 /// Encrypts given data according to 3DES as used in ICAO 9303
 ///
 /// Data should be pre-padded.
-pub fn tdes_enc(k_enc: &[u8], data: &[u8]) -> Vec<u8> {
-    return TDesCbcEnc::new_from_slices(k_enc, TDES_IV.as_slice())
+pub fn tdes_enc(key: &[u8], data: &[u8]) -> Vec<u8> {
+    return TDesCbcEnc::new_from_slices(key, TDES_IV.as_slice())
         .unwrap()
         .encrypt_padded_vec::<block_padding::NoPadding>(data);
+}
+
+/// Decrypts given data according to 3DES as used in ICAO 9303
+pub fn tdes_dec(key: &[u8], data: &[u8]) -> Vec<u8> {
+    return TDesCbcDec::new_from_slices(key, TDES_IV.as_slice())
+        .unwrap()
+        .decrypt_padded_vec::<block_padding::NoPadding>(data)
+        .unwrap();
 }
 
 /// Calculates E.IFD and M.IFD for BAC
@@ -183,10 +191,7 @@ pub fn calculate_bac_session_keys(
     k_ifd: &[u8],
 ) -> (Vec<u8>, Vec<u8>) {
     // Decrypt data we receive as response to BAC EXTERNAL_AUTHENTICATE
-    let dec_resp = TDesCbcDec::new_from_slices(k_enc, TDES_IV.as_slice())
-        .unwrap()
-        .decrypt_padded_vec::<block_padding::NoPadding>(&auth_resp)
-        .unwrap();
+    let dec_resp = tdes_dec(k_enc, &auth_resp);
     debug!("Decoded auth response: {:x?}", dec_resp);
     // Compare received RND.IFD with generated RND.IFD.
     assert!(&dec_resp[8..16] == rnd_ifd);
