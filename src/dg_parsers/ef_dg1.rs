@@ -8,15 +8,17 @@ use simplelog::{debug, info};
 impl types::TD3Mrz {
     #[cfg(feature = "cli")]
     pub fn fancy_print(&self) {
-        // TODO: parse document code
-        dg_helpers::print_string_element("Document Code", &self.document_code);
+        dg_helpers::print_string_element("Document Size", &"TD3".to_string());
+        dg_helpers::print_string_element(
+            "Document Type",
+            &dg_helpers::parse_mrz_document_code(&self.document_code, &self.issuing_state),
+        );
         dg_helpers::print_string_element("Issuing State", &self.issuing_state);
         dg_helpers::print_string_element_as_name("Name of Holder", &self.name_of_holder);
         dg_helpers::print_string_element("Document Number", &self.document_number);
         dg_helpers::print_string_element("Nationality", &self.nationality);
         dg_helpers::print_string_element_as_mrz_date("Date of Birth", &self.date_of_birth);
-        // TODO: parse sex
-        dg_helpers::print_string_element("Legal Sex Marker", &self.sex.to_string());
+        dg_helpers::print_string_element("Legal Sex Marker", &dg_helpers::parse_mrz_sex(self.sex));
         dg_helpers::print_string_element_as_mrz_date("Date of Expiry", &self.date_of_expiry);
         dg_helpers::print_string_element(
             "Optional elements",
@@ -29,7 +31,6 @@ impl types::EFDG1 {
     #[cfg(feature = "cli")]
     pub fn fancy_print(&self, data_group: &icao9303::DataGroup) {
         dg_helpers::print_section_intro("EF_DG1", data_group.description);
-        dg_helpers::print_string_element("Machine Readable Zone", &self.raw_mrz);
         // Here I have TD3 hardcoded, but that's not intended to stay.
         let result = types::TD3Mrz::deserialize(&self.raw_mrz).unwrap();
         result.fancy_print();

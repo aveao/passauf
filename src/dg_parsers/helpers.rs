@@ -164,6 +164,65 @@ fn pad_with_ellipses(text: &str) -> String {
     return format!("<b>{}</>{:.<pad_len$}", text, "");
 }
 
+pub(crate) fn parse_mrz_sex(sex: char) -> String {
+    // https://www.youtube.com/watch?v=HNy_retSME0
+    return match sex {
+        'M' => "Male".to_string(),
+        'F' => "Female".to_string(),
+        '<' => "X".to_string(),
+        _ => sex.to_string(),
+    };
+}
+
+pub(crate) fn parse_mrz_document_code(document_code: &String, country_code: &String) -> String {
+    // https://wf.lavatech.top/aves-tech-notes/emrtd-data-quirks see document type codes
+    if document_code.len() != 2 {
+        return document_code.to_string();
+    }
+    match document_code.as_str() {
+        "C<" => {
+            if country_code == "ITA" {
+                return "ID Card".to_string();
+            }
+        }
+        "I<" => {
+            return "ID Card".to_string();
+        }
+        "ID" => {
+            if ["DNK", "BEL", "PLN"].contains(&country_code.as_str()) {
+                return "ID or Residence Permit Card".to_string();
+            }
+            return "ID Card".to_string();
+        }
+        "IP" => {
+            return "Passport Card".to_string();
+        }
+        "AD" | "AR" | "CR" | "IR" | "IT" | "RP" | "RT" => {
+            return "Residence Permit Card".to_string();
+        }
+        "IB" | "IW" | "IK" | "IE" | "IO" | "IF" | "IZ" => {
+            if country_code == "PLN" {
+                return "Residence Permit Card".to_string();
+            }
+        }
+        _ => {}
+    }
+
+    match document_code.chars().nth(0).unwrap() {
+        'P' => {
+            return "Passport".to_string();
+        }
+        'I' => {
+            return "ID Card (probably)".to_string();
+        }
+        _ => {}
+    }
+    return format!(
+        "Unknown document {} (please open an issue on https://github.com/aveao/passauf )",
+        document_code
+    );
+}
+
 #[cfg(feature = "cli")]
 pub(crate) fn print_string_element(title: &str, value: &String) {
     info!("{} <yellow>{}</>", pad_with_ellipses(title), value.clone());
