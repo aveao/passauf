@@ -109,7 +109,6 @@ fn main() {
 
     // read all files under the master file
     for (_, (dg_name, dg_info)) in icao9303::DATA_GROUPS.entries.iter().enumerate() {
-        // debug!("{:?} - {:?}", dg_name, dg_info);
         if dg_name == &"EF.CardAccess" || dg_info.in_lds1 || (dg_info.pace_only && !pace_available)
         {
             continue;
@@ -136,7 +135,35 @@ fn main() {
         helpers::secure_select_and_read_file(&mut port, "EF.COM", true, &mut ssc, &ks_enc, &ks_mac)
             .unwrap();
     let dg_info = icao9303::DATA_GROUPS.get("EF.COM").unwrap();
-    (dg_info.parser)(file_data, &dg_info, true);
+    let parse_result = (dg_info.parser)(file_data, &dg_info, true).unwrap();
+    let ef_com_file: types::EFCom = match parse_result {
+        types::ParsedDataGroup::EFCom(ef_com_file) => ef_com_file,
+        _ => {
+            panic!("Expected EFCom but got {:x?}", parse_result);
+        }
+    };
+
+    // read all files under the LDS1 file
+    for (_, (dg_name, dg_info)) in icao9303::DATA_GROUPS.entries.iter().enumerate() {
+        // is_binary is temporary here
+        if dg_name == &"EF.COM"
+            || !dg_info.in_lds1
+            || dg_info.pace_only
+            || dg_info.is_binary
+            || !ef_com_file.data_group_tag_list.contains(&dg_info.tag)
+        {
+            continue;
+        }
+        let file_data = helpers::secure_select_and_read_file(
+            &mut port, dg_name, true, &mut ssc, &ks_enc, &ks_mac,
+        );
+        match file_data {
+            Some(file_data) => {
+                (dg_info.parser)(file_data, &dg_info, true);
+            }
+            None => {}
+        }
+    }
 
     // read all the rest of files
 

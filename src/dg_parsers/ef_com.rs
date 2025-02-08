@@ -1,3 +1,4 @@
+use crate::dg_parsers::helpers as dg_helpers;
 use crate::helpers;
 use crate::icao9303;
 use crate::types;
@@ -10,22 +11,15 @@ impl types::EFCom {
         // TODO: smth for easier dashes
         info!("------------------------ <blue>EF_COM</> ------------------------");
         info!("({})", data_group.description);
-        if self.lds_version != None {
-            info!("<b>LDS Version</b>: {:02x?}", &self.lds_version.unwrap())
-        };
-        if self.unicode_version != None {
-            info!(
-                "<b>Unicode Version</b>: {}",
-                &self.unicode_version.clone().unwrap()
-            )
-        };
+        dg_helpers::print_option_binary_element("LDS Version", &self.lds_version);
+        dg_helpers::print_option_string_element("Unicode Version", &self.unicode_version);
         info!("<b><u>Files on this document</b>:</u>");
 
         // TODO: sorting would be nice, somehow.
         for (_, (dg_name, dg_info)) in icao9303::DATA_GROUPS.entries.iter().enumerate() {
             if self.data_group_tag_list.contains(&dg_info.tag) {
                 // TODO: smth for easier dots
-                info!("<b>{}</b>: <yellow>{}</>", dg_name, dg_info.description)
+                info!("<b>{}</b>: <yellow>{}</>", dg_name, dg_info.description);
             }
         }
     }
@@ -36,7 +30,7 @@ pub fn parser(
     data_group: &icao9303::DataGroup,
     print_data: bool,
 ) -> Option<types::ParsedDataGroup> {
-    debug!("Read EF.COM ({:?}b): {:x?}", data.len(), data);
+    debug!("Read file ({:?}b): {:x?}", data.len(), data);
 
     // Parse the base TLV
     let base_tlv = ber::Tlv::parse(&data).0.unwrap();
@@ -48,8 +42,8 @@ pub fn parser(
     let tlvs = helpers::sort_tlvs_by_tag(&base_tlv_value);
     debug!("tlvs: {:02x?}", tlvs);
 
-    // Deserialize the EFCom file from the given TLV data.
-    let efcom_file = types::EFCom {
+    // Deserialize the file from the given TLV data.
+    let result = types::EFCom {
         lds_version: match tlvs.get(&0x5F01) {
             Some(data) => {
                 let value_bytes = helpers::get_tlv_value_bytes(data);
@@ -69,11 +63,12 @@ pub fn parser(
             }
             None => None,
         },
-        data_group_tag_list: helpers::get_tlv_value_bytes(tlvs.get(&0x5C).unwrap()),
+        data_group_tag_list: dg_helpers::tlv_get_bytes(&tlvs, &0x5C)
+            .expect("EF.COM does not have a tag list."),
     };
     if print_data {
         #[cfg(feature = "cli")]
-        efcom_file.fancy_print(data_group);
+        result.fancy_print(data_group);
     }
-    return Some(types::ParsedDataGroup::EFCom(efcom_file));
+    return Some(types::ParsedDataGroup::EFCom(result));
 }

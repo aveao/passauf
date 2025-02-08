@@ -162,8 +162,8 @@ impl ApduCommand {
         if self.max_resp_len != 0 {
             // Tag is 0x97, "One or two bytes encoding Le in the unsecured C-RP (possibly empty)"
             let tag = ber::Tag::try_from(0x97).unwrap();
-            // Value is the original Le
 
+            // Value is the original Le
             let do_97_tlv = ber::Tlv::new(tag, ber::Value::Primitive(base_le.clone())).unwrap();
             debug!("do_97_tlv: {:02x?}", do_97_tlv);
             secure_data.extend_from_slice(&do_97_tlv.to_vec());
@@ -210,7 +210,7 @@ impl ApduCommand {
 
 /// Parse a secure Response APDU
 ///
-/// Currently supports DO'99' and DO'87'
+/// Currently supports DO'99', '87' and '8E'
 /// Returns the decrypted data from DO'87'
 pub fn parse_secure_rapdu(
     rapdu: &[u8],
@@ -261,6 +261,8 @@ pub fn parse_secure_rapdu(
         let mut do_87_value = helpers::get_tlv_value_bytes(do_87_tlv.to_owned());
         // We skip first byte due to it being the "Padding-content indicator byte".
         // ICAO 9303 only allows one value, so we don't need to think much about it.
+        // Still, an assert is here.
+        assert!(do_87_value[0] == 0x01);
         do_87_value = do_87_value[1..].to_vec();
         debug!("do_87_value: {:02x?}", do_87_value);
         let decrypted_data = icao9303::tdes_dec(ks_enc, &do_87_value);

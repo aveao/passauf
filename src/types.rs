@@ -208,6 +208,35 @@ pub struct EFCom {
     pub data_group_tag_list: Vec<u8>,
 }
 
+#[derive(Debug)]
+pub struct EFDG1 {
+    // ICAO 9303 part 10, edition 8, 4.7.1
+    pub raw_mrz: String,
+    // TODO: values
+}
+
+#[derive(Debug)]
+pub struct EFDG12 {
+    // ICAO 9303 part 10, edition 8, 4.7.12
+    pub issuing_authority: Option<String>,
+    /// YYYYMMDD
+    pub date_of_issue: Option<String>,
+    pub other_persons: Option<Vec<String>>,
+    pub endorsements_observations: Option<String>,
+    pub tax_exit_requirements: Option<String>,
+    /// JPEG
+    pub image_of_front_of_emrtd: Option<Vec<u8>>,
+    /// JPEG
+    pub image_of_rear_of_emrtd: Option<Vec<u8>>,
+    /// yyyymmddhhmmss
+    pub personalization_timestamp: Option<String>,
+    pub personalization_device_serial_number: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
 pub enum ParsedDataGroup {
     EFCom(EFCom),
+    EFDG1(EFDG1),
+    EFDG12(EFDG12),
 }
