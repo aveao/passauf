@@ -36,6 +36,39 @@ pub(crate) fn print_option_string_element(name: &str, value: &Option<String>) {
     info!("<b>{}</b>: {}", name, value.clone().unwrap());
 }
 
+/// Formats a name from an MRZ.
+///
+/// Returns (first_name, last_name).
+/// If no last name is present, returns (full_name, empty).
+pub fn format_mrz_name(text: &String) -> (String, String) {
+    let name_with_spaces = text.replace("<", " ");
+    // Last name is separated by <<.
+    let last_name_index = text.find("<<");
+    match last_name_index {
+        Some(index) => {
+            return (
+                // + 2 here for the length of <<
+                name_with_spaces[index + 2..].to_string(),
+                name_with_spaces[0..index].to_string(),
+            );
+        }
+        None => {
+            return (name_with_spaces.to_string(), "".to_string());
+        }
+    }
+}
+
+#[cfg(feature = "cli")]
+pub(crate) fn print_option_string_element_as_name(title: &str, value: &Option<String>) {
+    if *value == None {
+        return;
+    }
+    let text = value.clone().unwrap();
+    let (first_name, last_name) = format_mrz_name(&text);
+    // TODO: ellipses
+    info!("<b>{}</b>: {} {}", title, &first_name, &last_name);
+}
+
 #[cfg(feature = "cli")]
 pub(crate) fn print_option_binary_element<T>(name: &str, value: &Option<T>)
 where

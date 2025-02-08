@@ -12,7 +12,7 @@ impl types::EFDG11 {
         // TODO: smth for easier dashes
         info!("------------------------ <blue>EF_DG11</> -----------------------");
         info!("({})", data_group.description);
-        dg_helpers::print_option_string_element("Full name of holder", &self.full_name);
+        dg_helpers::print_option_string_element_as_name("Full name of holder", &self.full_name);
         dg_helpers::print_option_debug_element("Other names", &self.other_names);
         dg_helpers::print_option_string_element("Personal number", &self.personal_number);
         dg_helpers::print_option_string_element("Full date of birth", &self.full_date_of_birth);
