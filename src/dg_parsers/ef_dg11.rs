@@ -12,7 +12,7 @@ impl types::EFDG11 {
         dg_helpers::print_option_string_element_as_name("Full name of holder", &self.full_name);
         dg_helpers::print_option_debug_element("Other names", &self.other_names);
         dg_helpers::print_option_string_element("Personal number", &self.personal_number);
-        dg_helpers::print_option_string_element_as_date(
+        dg_helpers::print_option_string_element_as_dg_date(
             "Full date of birth",
             &self.full_date_of_birth,
         );

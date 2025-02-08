@@ -24,6 +24,19 @@ pub(crate) fn tlv_get_bytes(tlvs: &HashMap<u16, &ber::Tlv>, tag: &u16) -> Option
     }
 }
 
+/// Remove the < characters at the end of the given string.
+pub fn remove_mrz_padding(text: &String) -> String {
+    let mut last_padding_index: usize = 0;
+    for (index, character) in text.chars().rev().enumerate() {
+        if character != '<' {
+            // as the index is reversed, we set this to total_len - index
+            last_padding_index = text.len() - index;
+            break;
+        }
+    }
+    return text[..last_padding_index].to_string();
+}
+
 /// Formats a name from an MRZ.
 ///
 /// Returns (first_name, last_name).
@@ -79,6 +92,30 @@ pub fn parse_dg_date(text: &String) -> Option<(u8, u8, u16)> {
             + (date_numbers[1] as u16 * 100)
             + (date_numbers[2] as u16 * 10)
             + (date_numbers[3] as u16),
+    ));
+}
+
+/// Parses a date from MRZ. Must be in YYMMDD format.
+///
+/// Returns (DD, MM, YYYY) if it is in correct format, else None.
+pub fn parse_mrz_date(text: &String) -> Option<(u8, u8, u16)> {
+    // If this is 40, then < 40 is assumed to be 2000s, and > 40 is assumed to be 1900s
+    // This should account for expiry date, so current year + 10 is lowest safeish amount.
+    const CENTURY_CUTOFF: u8 = 40;
+    if text.len() != 6 {
+        return None;
+    }
+    let date_numbers = text_to_numeric(text)?;
+    let year_last_two_digits = (date_numbers[0] * 10) + date_numbers[1];
+    let year: u16 = if year_last_two_digits < CENTURY_CUTOFF {
+        2000 + year_last_two_digits as u16
+    } else {
+        1900 + year_last_two_digits as u16
+    };
+    return Some((
+        date_numbers[4] * 10 + date_numbers[5],
+        date_numbers[2] * 10 + date_numbers[3],
+        year,
     ));
 }
 
@@ -160,7 +197,25 @@ pub(crate) fn print_option_string_element_as_name(title: &str, value: &Option<St
 }
 
 #[cfg(feature = "cli")]
-pub(crate) fn print_option_string_element_as_date(title: &str, value: &Option<String>) {
+pub(crate) fn print_string_element_as_name(title: &str, value: &String) {
+    let (first_name, last_name) = format_mrz_name(value);
+    info!(
+        "{} <yellow>{} {}</>",
+        pad_with_ellipses(title),
+        &first_name,
+        &last_name
+    );
+}
+
+#[cfg(feature = "cli")]
+pub(crate) fn print_string_element_as_mrz_date(title: &str, value: &String) {
+    let (dd, mm, yyyy) = parse_mrz_date(&value).unwrap();
+    let date_str = format_date(dd, mm, yyyy);
+    info!("{} <yellow>{}</>", pad_with_ellipses(title), date_str);
+}
+
+#[cfg(feature = "cli")]
+pub(crate) fn print_option_string_element_as_dg_date(title: &str, value: &Option<String>) {
     if *value == None {
         return;
     }

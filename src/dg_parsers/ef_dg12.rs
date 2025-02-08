@@ -10,7 +10,7 @@ impl types::EFDG12 {
     pub fn fancy_print(&self, data_group: &icao9303::DataGroup) {
         dg_helpers::print_section_intro("EF_DG12", data_group.description);
         dg_helpers::print_option_string_element("Issuing Authority", &self.issuing_authority);
-        dg_helpers::print_option_string_element_as_date("Date of issue", &self.date_of_issue);
+        dg_helpers::print_option_string_element_as_dg_date("Date of issue", &self.date_of_issue);
         dg_helpers::print_option_debug_element("Other persons", &self.other_persons);
         dg_helpers::print_option_string_element(
             "Endorsements/Observations",

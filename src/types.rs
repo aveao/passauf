@@ -1,6 +1,8 @@
 use asn1;
 use phf::phf_map;
 
+use crate::dg_parsers::helpers as dg_helpers;
+
 // handy: https://oid-rep.orange-labs.fr/get/0.4.0.127.0.7.2.2.2
 pub static PACE_DOMAIN_PARAMETERS_OIDS: phf::Map<&'static str, &'static asn1::ObjectIdentifier> = phf_map! {
     "DH_GM" => &asn1::oid!(0x00, 0x04, 0x00, 0x7F, 0x00, 0x07, 0x02, 0x02, 0x04, 0x01),
@@ -211,8 +213,8 @@ pub struct EFCom {
 #[derive(Debug)]
 pub struct EFDG1 {
     // ICAO 9303 part 10, edition 8, 4.7.1
+    /// Can be parsed using MRZ/TD1Mrz/TD2Mrz/TD3Mrz.
     pub raw_mrz: String,
-    // TODO: values
 }
 
 #[derive(Debug)]
@@ -260,4 +262,79 @@ pub enum ParsedDataGroup {
     EFDG1(EFDG1),
     EFDG11(EFDG11),
     EFDG12(EFDG12),
+}
+
+#[derive(Debug)]
+pub enum MRZ {
+    // TD1Mrz(TD1Mrz),
+    // TD2Mrz(TD2Mrz),
+    TD3Mrz(TD3Mrz),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TD3Mrz {
+    // ICAO 9303 part 4, edition 8, 4.2.2
+    pub raw_mrz: String,
+    /// 2 characters. The first character shall be P to designate an MRP.
+    /// The second character shall identify the MRP type, as detailed in Section 4.4.
+    pub document_code: String,
+    /// The three-letter code specified in Doc 9303-3 shall be used.
+    /// Spaces shall be replaced by filler characters (<).
+    pub issuing_state: String,
+    /// 39 characters.
+    pub name_of_holder: String,
+    /// 9 characters
+    pub document_number: String,
+    /// 1 character
+    pub document_number_check_digit: char,
+    /// The three-letter code specified in Doc 9303-3 shall be used.
+    /// Spaces shall be replaced by filler characters (<).
+    pub nationality: String,
+    /// 6 characters, YYMMDD
+    pub date_of_birth: String,
+    /// 1 character
+    pub date_of_birth_check_digit: char,
+    /// F = female; M = male; < = unspecified.
+    pub sex: char,
+    /// 6 characters, YYMMDD
+    pub date_of_expiry: String,
+    /// 1 character
+    pub date_of_expiry_check_digit: char,
+    /// 14 characters, padded with <
+    pub personal_number_or_optional_data_elements: String,
+    /// 1 character, can be 0 or < if personal_number_or_optional_data_elements is unused.
+    pub personal_number_or_optional_data_elements_check_digit: char,
+    /// 1 character
+    pub composite_check_digit: char,
+}
+
+impl TD3Mrz {
+    pub fn deserialize(input: &String) -> Option<TD3Mrz> {
+        if input.len() != 88 {
+            return None;
+        }
+        return Some(TD3Mrz {
+            raw_mrz: input.to_string(),
+            document_code: input[0..2].to_string(),
+            issuing_state: dg_helpers::remove_mrz_padding(&input[2..5].to_string()),
+            name_of_holder: dg_helpers::remove_mrz_padding(&input[5..44].to_string()),
+            document_number: dg_helpers::remove_mrz_padding(&input[44..53].to_string()),
+            document_number_check_digit: input.chars().nth(53)?,
+            nationality: dg_helpers::remove_mrz_padding(&input[54..57].to_string()),
+            date_of_birth: input[57..63].to_string(),
+            date_of_birth_check_digit: input.chars().nth(63)?,
+            sex: input.chars().nth(64)?,
+            date_of_expiry: input[65..71].to_string(),
+            date_of_expiry_check_digit: input.chars().nth(71)?,
+            personal_number_or_optional_data_elements: dg_helpers::remove_mrz_padding(
+                &input[72..86].to_string(),
+            ),
+            personal_number_or_optional_data_elements_check_digit: input.chars().nth(86)?,
+            composite_check_digit: input.chars().nth(87)?,
+        });
+    }
+
+    // pub fn validate_check_digits(&self¸, verbose: bool) -> Vec<bool> {
+
+    // }
 }
