@@ -216,6 +216,26 @@ pub struct EFDG1 {
 }
 
 #[derive(Debug)]
+pub struct EFDG11 {
+    // ICAO 9303 part 10, edition 8, 4.7.11
+    pub full_name: Option<String>,
+    pub other_names: Option<Vec<String>>,
+    pub personal_number: Option<String>,
+    /// YYYYMMDD
+    pub full_date_of_birth: Option<String>,
+    pub place_of_birth: Option<String>,
+    pub permanent_address: Option<String>,
+    pub telephone: Option<String>,
+    pub profession: Option<String>,
+    pub title: Option<String>,
+    pub personal_summary: Option<String>,
+    /// JPEG
+    pub proof_of_citizenship: Option<Vec<u8>>,
+    pub other_valid_td_numbers: Option<String>,
+    pub custody_information: Option<String>,
+}
+
+#[derive(Debug)]
 pub struct EFDG12 {
     // ICAO 9303 part 10, edition 8, 4.7.12
     pub issuing_authority: Option<String>,
@@ -238,5 +258,6 @@ pub struct EFDG12 {
 pub enum ParsedDataGroup {
     EFCom(EFCom),
     EFDG1(EFDG1),
+    EFDG11(EFDG11),
     EFDG12(EFDG12),
 }

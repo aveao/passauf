@@ -8,6 +8,7 @@ use simplelog::{debug, info};
 impl types::EFDG12 {
     #[cfg(feature = "cli")]
     pub fn fancy_print(&self, data_group: &icao9303::DataGroup) {
+        info!("");
         // TODO: smth for easier dashes
         info!("------------------------ <blue>EF_DG12</> -----------------------");
         info!("({})", data_group.description);
@@ -38,6 +39,7 @@ impl types::EFDG12 {
             "Personalization Device Serial Number",
             &self.personalization_device_serial_number,
         );
+        info!("");
     }
 }
 

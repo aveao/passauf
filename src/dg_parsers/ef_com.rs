@@ -8,6 +8,7 @@ use simplelog::{debug, info};
 impl types::EFCom {
     #[cfg(feature = "cli")]
     pub fn fancy_print(&self, data_group: &icao9303::DataGroup) {
+        info!("");
         // TODO: smth for easier dashes
         info!("------------------------ <blue>EF_COM</> ------------------------");
         info!("({})", data_group.description);
@@ -22,6 +23,7 @@ impl types::EFCom {
                 info!("<b>{}</b>: <yellow>{}</>", dg_name, dg_info.description);
             }
         }
+        info!("");
     }
 }
 

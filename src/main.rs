@@ -165,7 +165,7 @@ fn main() {
         }
     }
 
-    // read all the rest of files
+    // Read and compare EF_SOD
 
     let _ = proxmark::quit_session(&mut port);
     drop(port);

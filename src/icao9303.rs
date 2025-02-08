@@ -33,11 +33,11 @@ pub static DATA_GROUPS: phf::Map<&'static str, &'static DataGroup> = phf_map! {
     "EF.DG8" => &DataGroup{tag: 0x68, dg_num: 8, file_id: 0x0108, description: "Data Feature(s)", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_binary: false},
     "EF.DG9" => &DataGroup{tag: 0x69, dg_num: 9, file_id: 0x0109, description: "Structure Feature(s)", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_binary: false},
     "EF.DG10" => &DataGroup{tag: 0x6a, dg_num: 10, file_id: 0x010A, description: "Substance Feature(s)", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_binary: false},
-    "EF.DG11" => &DataGroup{tag: 0x6b, dg_num: 11, file_id: 0x010B, description: "Additional Personal Detail(s)", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_binary: false},
+    "EF.DG11" => &DataGroup{tag: 0x6b, dg_num: 11, file_id: 0x010B, description: "Additional Personal Detail(s)", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::ef_dg11::parser, is_binary: false},
     "EF.DG12" => &DataGroup{tag: 0x6c, dg_num: 12, file_id: 0x010C, description: "Additional Document Detail(s)", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::ef_dg12::parser, is_binary: false},
     "EF.DG13" => &DataGroup{tag: 0x6d, dg_num: 13, file_id: 0x010D, description: "Optional Detail(s)", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_binary: false},
     "EF.DG14" => &DataGroup{tag: 0x6e, dg_num: 14, file_id: 0x010E, description: "Security Options", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_binary: false},
-    "EF.DG15" => &DataGroup{tag: 0x6f, dg_num: 15, file_id: 0x010F, description: "Active Authentication Public Key Info", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_binary: false},
+    "EF.DG15" => &DataGroup{tag: 0x6f, dg_num: 15, file_id: 0x010F, description: "Active Authentication Public Key Info", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_binary: true},
     "EF.DG16" => &DataGroup{tag: 0x70, dg_num: 16, file_id: 0x0110, description: "Person(s) to Notify", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_binary: false},
     "EF.SOD" => &DataGroup{tag: 0x77, dg_num: 0, file_id: 0x011D, description: "Document Security Object", pace_only: false, eac_only: false, in_lds1: true, parser: dg_parsers::generic::parser, is_binary: false},
 };
