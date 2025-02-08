@@ -4,6 +4,8 @@ use std::collections::HashMap;
 
 use crate::helpers;
 
+const PRINT_TITLE_PAD_TO_LEN: usize = 25;
+
 pub(crate) fn tlv_get_string_value(tlvs: &HashMap<u16, &ber::Tlv>, tag: &u16) -> Option<String> {
     match tlvs.get(tag) {
         Some(data) => {
@@ -19,21 +21,6 @@ pub(crate) fn tlv_get_bytes(tlvs: &HashMap<u16, &ber::Tlv>, tag: &u16) -> Option
         Some(data) => Some(helpers::get_tlv_value_bytes(data)),
         None => None,
     }
-}
-
-#[cfg(feature = "cli")]
-pub(crate) fn print_string_element(name: &str, value: &String) {
-    // TODO: ellipses
-    info!("<b>{}</b>: {}", name, value.clone());
-}
-
-#[cfg(feature = "cli")]
-pub(crate) fn print_option_string_element(name: &str, value: &Option<String>) {
-    if *value == None {
-        return;
-    }
-    // TODO: ellipses
-    info!("<b>{}</b>: {}", name, value.clone().unwrap());
 }
 
 /// Formats a name from an MRZ.
@@ -58,6 +45,74 @@ pub fn format_mrz_name(text: &String) -> (String, String) {
     }
 }
 
+/// Converts an UTF-8/ASCII text to its number representations.
+///
+/// All values in text must be in ASCII 0-9 range (48-57), else it returns None.
+pub fn text_to_numeric(text: &String) -> Option<Vec<u8>> {
+    let mut result_vec: Vec<u8> = vec![];
+    for character in text.as_bytes() {
+        match character {
+            b'0'..=b'9' => {
+                result_vec.push(character - b'0');
+            }
+            _ => {
+                return None;
+            }
+        }
+    }
+    return Some(result_vec);
+}
+
+/// Parses a date from a DG. Must be in YYYYMMDD format.
+///
+/// Returns (DD, MM, YYYY) if it is in correct format, else None.
+pub fn parse_dg_date(text: &String) -> Option<(u8, u8, u16)> {
+    if text.len() != 8 {
+        return None;
+    }
+    let date_numbers = text_to_numeric(text)?;
+    return Some((
+        date_numbers[6] * 10 + date_numbers[7],
+        date_numbers[4] * 10 + date_numbers[5],
+        (date_numbers[0] as u16 * 1000)
+            + (date_numbers[1] as u16 * 100)
+            + (date_numbers[2] as u16 * 10)
+            + (date_numbers[3] as u16),
+    ));
+}
+
+/// Formats a date. Must be in (DD, MM, YYYY) format.
+///
+/// Returns "DD.MM.YYYY (YYYY-MM-DD)".
+pub fn format_date(dd: u8, mm: u8, yyyy: u16) -> String {
+    return format!(
+        "{:02}.{:02}.{:04} ({:04}-{:02}-{:02})",
+        dd, mm, yyyy, yyyy, mm, dd
+    );
+}
+
+fn pad_with_ellipses(text: &str) -> String {
+    let pad_len = PRINT_TITLE_PAD_TO_LEN - text.len();
+    return format!("<b>{}</b>{:.<pad_len$}", text, "");
+}
+
+#[cfg(feature = "cli")]
+pub(crate) fn print_string_element(title: &str, value: &String) {
+    info!("{} <yellow>{}</>", pad_with_ellipses(title), value.clone());
+}
+
+#[cfg(feature = "cli")]
+pub(crate) fn print_option_string_element(title: &str, value: &Option<String>) {
+    if *value == None {
+        return;
+    }
+    info!(
+        "{} <yellow>{}</>",
+        pad_with_ellipses(title),
+        value.clone().unwrap()
+    );
+}
+
 #[cfg(feature = "cli")]
 pub(crate) fn print_option_string_element_as_name(title: &str, value: &Option<String>) {
     if *value == None {
@@ -65,12 +120,27 @@ pub(crate) fn print_option_string_element_as_name(title: &str, value: &Option<St
     }
     let text = value.clone().unwrap();
     let (first_name, last_name) = format_mrz_name(&text);
-    // TODO: ellipses
-    info!("<b>{}</b>: {} {}", title, &first_name, &last_name);
+    info!(
+        "{} <yellow>{} {}</>",
+        pad_with_ellipses(title),
+        &first_name,
+        &last_name
+    );
 }
 
 #[cfg(feature = "cli")]
-pub(crate) fn print_option_binary_element<T>(name: &str, value: &Option<T>)
+pub(crate) fn print_option_string_element_as_date(title: &str, value: &Option<String>) {
+    if *value == None {
+        return;
+    }
+    let text = value.clone().unwrap();
+    let (dd, mm, yyyy) = parse_dg_date(&text).unwrap();
+    let date_str = format_date(dd, mm, yyyy);
+    info!("{} <yellow>{}</>", pad_with_ellipses(title), date_str);
+}
+
+#[cfg(feature = "cli")]
+pub(crate) fn print_option_binary_element<T>(title: &str, value: &Option<T>)
 where
     T: IntoIterator + PartialEq + Clone + std::fmt::Debug,
     T::IntoIter: ExactSizeIterator,
@@ -86,17 +156,17 @@ where
     // magic number
     if data_iter.len() > 128 {
         info!(
-            "<b>{}</b>: [Binary File of {} bytes]",
-            name,
+            "{} <yellow>[Binary File of {} bytes]</>",
+            pad_with_ellipses(title),
             data_iter.len()
         );
     } else {
-        info!("<b>{}</b>: {:02x?}", name, data);
+        info!("{} <yellow>{:02x?}</>", pad_with_ellipses(title), data);
     }
 }
 
 #[cfg(feature = "cli")]
-pub(crate) fn print_option_debug_element<T>(name: &str, value: &Option<T>)
+pub(crate) fn print_option_debug_element<T>(title: &str, value: &Option<T>)
 where
     T: std::fmt::Debug + Clone + PartialEq,
 {
@@ -104,6 +174,9 @@ where
     if *value == None {
         return;
     }
-    // TODO: ellipses
-    info!("<b>{}</b>: {:02x?}", name, value.clone().unwrap());
+    info!(
+        "{} <yellow>{:02x?}</>",
+        pad_with_ellipses(title),
+        value.clone().unwrap()
+    );
 }

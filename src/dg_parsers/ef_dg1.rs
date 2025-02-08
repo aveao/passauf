@@ -12,7 +12,7 @@ impl types::EFDG1 {
         // TODO: smth for easier dashes
         info!("------------------------ <blue>EF_DG1</> ------------------------");
         info!("({})", data_group.description);
-        dg_helpers::print_string_element("MRZ", &self.raw_mrz);
+        dg_helpers::print_string_element("Machine Readable Zone", &self.raw_mrz);
         info!("");
     }
 }

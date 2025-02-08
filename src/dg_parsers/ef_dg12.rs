@@ -13,7 +13,7 @@ impl types::EFDG12 {
         info!("------------------------ <blue>EF_DG12</> -----------------------");
         info!("({})", data_group.description);
         dg_helpers::print_option_string_element("Issuing Authority", &self.issuing_authority);
-        dg_helpers::print_option_string_element("Date of issue", &self.date_of_issue);
+        dg_helpers::print_option_string_element_as_date("Date of issue", &self.date_of_issue);
         dg_helpers::print_option_debug_element("Other persons", &self.other_persons);
         dg_helpers::print_option_string_element(
             "Endorsements/Observations",
