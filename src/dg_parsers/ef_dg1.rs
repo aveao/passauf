@@ -8,10 +8,7 @@ use simplelog::{debug, info};
 impl types::EFDG1 {
     #[cfg(feature = "cli")]
     pub fn fancy_print(&self, data_group: &icao9303::DataGroup) {
-        info!("");
-        // TODO: smth for easier dashes
-        info!("------------------------ <blue>EF_DG1</> ------------------------");
-        info!("({})", data_group.description);
+        dg_helpers::print_section_intro("EF_DG1", data_group.description);
         dg_helpers::print_string_element("Machine Readable Zone", &self.raw_mrz);
         info!("");
     }

@@ -8,10 +8,7 @@ use simplelog::{debug, info};
 impl types::EFDG11 {
     #[cfg(feature = "cli")]
     pub fn fancy_print(&self, data_group: &icao9303::DataGroup) {
-        info!("");
-        // TODO: smth for easier dashes
-        info!("------------------------ <blue>EF_DG11</> -----------------------");
-        info!("({})", data_group.description);
+        dg_helpers::print_section_intro("EF_DG11", data_group.description);
         dg_helpers::print_option_string_element_as_name("Full name of holder", &self.full_name);
         dg_helpers::print_option_debug_element("Other names", &self.other_names);
         dg_helpers::print_option_string_element("Personal number", &self.personal_number);

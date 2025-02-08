@@ -8,19 +8,25 @@ use simplelog::{debug, info};
 impl types::EFCom {
     #[cfg(feature = "cli")]
     pub fn fancy_print(&self, data_group: &icao9303::DataGroup) {
-        info!("");
-        // TODO: smth for easier dashes
-        info!("------------------------ <blue>EF_COM</> ------------------------");
-        info!("({})", data_group.description);
+        dg_helpers::print_section_intro("EF_COM", data_group.description);
         dg_helpers::print_option_binary_element("LDS Version", &self.lds_version);
         dg_helpers::print_option_string_element("Unicode Version", &self.unicode_version);
-        info!("<b><u>Files on this document</b>:</u>");
+        info!("");
+        info!(
+            "{:^pad_len$}",
+            "<b><u>Files on this document</>",
+            pad_len = 56
+        );
 
         // TODO: sorting would be nice, somehow.
         for (_, (dg_name, dg_info)) in icao9303::DATA_GROUPS.entries.iter().enumerate() {
             if self.data_group_tag_list.contains(&dg_info.tag) {
-                // TODO: smth for easier dots
-                info!("<b>{}</b>: <yellow>{}</>", dg_name, dg_info.description);
+                info!(
+                    "{:>pad_len$} <yellow>{}</>",
+                    dg_name,
+                    dg_info.description,
+                    pad_len = 15
+                );
             }
         }
         info!("");

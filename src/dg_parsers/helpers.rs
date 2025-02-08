@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use crate::helpers;
 
+const SECTION_TITLE_PAD_TO_LEN: usize = 56;
 const PRINT_TITLE_PAD_TO_LEN: usize = 25;
 
 pub(crate) fn tlv_get_string_value(tlvs: &HashMap<u16, &ber::Tlv>, tag: &u16) -> Option<String> {
@@ -86,14 +87,44 @@ pub fn parse_dg_date(text: &String) -> Option<(u8, u8, u16)> {
 /// Returns "DD.MM.YYYY (YYYY-MM-DD)".
 pub fn format_date(dd: u8, mm: u8, yyyy: u16) -> String {
     return format!(
-        "{:02}.{:02}.{:04} ({:04}-{:02}-{:02})",
-        dd, mm, yyyy, yyyy, mm, dd
+        "{dd:02}.{mm:02}.{yyyy:04} ({yyyy:04}-{mm:02}-{dd:02})",
+        dd = dd,
+        mm = mm,
+        yyyy = yyyy
+    );
+}
+
+pub(crate) fn print_section_intro(filename: &str, subtitle: &str) {
+    info!("");
+    info!("{}", pad_section_title(filename));
+    info!("{}", pad_section_subtitle(subtitle));
+    info!("");
+}
+
+/// Pads a section title with =s up to 56 characters.
+pub(crate) fn pad_section_title(text: &str) -> String {
+    let text_to_pad = format!(" <blue>{}</> ", text);
+    // + 9 here to account for the color tags
+    return format!(
+        "{:=^pad_len$}",
+        text_to_pad,
+        pad_len = SECTION_TITLE_PAD_TO_LEN + 9
+    );
+}
+
+/// Pads a section subtitle with spaces up to 56 characters.
+pub(crate) fn pad_section_subtitle(text: &str) -> String {
+    let text_to_pad = format!("({})", text);
+    return format!(
+        "{:^pad_len$}",
+        text_to_pad,
+        pad_len = SECTION_TITLE_PAD_TO_LEN
     );
 }
 
 fn pad_with_ellipses(text: &str) -> String {
     let pad_len = PRINT_TITLE_PAD_TO_LEN - text.len();
-    return format!("<b>{}</b>{:.<pad_len$}", text, "");
+    return format!("<b>{}</>{:.<pad_len$}", text, "");
 }
 
 #[cfg(feature = "cli")]
