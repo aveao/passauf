@@ -106,7 +106,7 @@ pub(crate) fn pad_section_title(text: &str) -> String {
     let text_to_pad = format!(" <blue>{}</> ", text);
     // + 9 here to account for the color tags
     return format!(
-        "{:=^pad_len$}",
+        "<b>{:=^pad_len$}</>",
         text_to_pad,
         pad_len = SECTION_TITLE_PAD_TO_LEN + 9
     );
@@ -180,7 +180,6 @@ where
     if *value == None {
         return;
     }
-    // TODO: ellipses
     // needing to clone sucks here, can we do better?
     let data = value.clone().unwrap();
     let data_iter = data.clone().into_iter();

@@ -172,7 +172,7 @@ pub fn secure_select_and_read_file(
 ) -> Option<Vec<u8>> {
     let dg_info = icao9303::DATA_GROUPS.get(filename).unwrap();
 
-    info!("Selecting {} ({})", filename, dg_info.description);
+    info!("<d>Selecting {} ({})</>", filename, dg_info.description);
     let mut apdu = iso7816::apdu_select_file_by_ef(dg_info.file_id);
     let (_, _, status_code) =
         secure_exchange_apdu(port, &mut apdu, false, secure_comms, ssc, ks_enc, ks_mac);
@@ -182,7 +182,7 @@ pub fn secure_select_and_read_file(
         return None;
     }
 
-    info!("Reading {} ({})", filename, dg_info.description);
+    info!("<d>Reading {} ({})</>", filename, dg_info.description);
     let mut total_data: Vec<u8> = vec![];
     let mut bytes_to_read = 0x05;
     let mut file_len: u16 = 0;
