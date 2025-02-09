@@ -66,3 +66,24 @@ pub fn sort_tlvs_by_tag(tlvs: &Vec<ber::Tlv>) -> HashMap<u16, &ber::Tlv> {
     }
     return rapdu_tlvs;
 }
+
+pub fn get_tlvs_by_tag(tlvs: &Vec<ber::Tlv>, desired_tag_number: u16) -> Vec<&ber::Tlv> {
+    let mut rapdu_tlvs: Vec<&ber::Tlv> = vec![];
+    for tlv in tlvs.iter() {
+        let tag_number = get_tlv_tag(&tlv);
+        if desired_tag_number == tag_number {
+            rapdu_tlvs.push(tlv);
+        }
+    }
+    return rapdu_tlvs;
+}
+
+pub fn get_tlv_by_tag(tlvs: &Vec<ber::Tlv>, desired_tag_number: u16) -> Option<&ber::Tlv> {
+    for tlv in tlvs.iter() {
+        let tag_number = get_tlv_tag(&tlv);
+        if desired_tag_number == tag_number {
+            return Some(tlv);
+        }
+    }
+    return None;
+}

@@ -9,7 +9,7 @@ mod types;
 
 use simplelog::{info, warn, CombinedLogger, TermLogger};
 use smartcard_abstractions::{InterfaceDevice, ProxmarkInterface};
-use std::env;
+use std::{env, fs::File, io::Write};
 
 fn main() {
     let log_level = simplelog::LevelFilter::Info;
@@ -26,7 +26,6 @@ fn main() {
 
     // Select a nearby eMRTD
     let mut smartcard = interface.select().unwrap();
-
     let mut pace_available = false;
 
     let file_data = iso7816::select_and_read_file(&mut smartcard, "EF.CardAccess");
@@ -55,8 +54,8 @@ fn main() {
     }
 
     info!("Selecting eMRTD LDS1 applet");
-    let mut apdu = iso7816::apdu_select_file_by_name(icao9303::AID_MRTD_LDS1.to_vec());
-    let (_, status_code) = apdu.exchange(&mut smartcard, true);
+    let (_, status_code) = iso7816::apdu_select_file_by_name(icao9303::AID_MRTD_LDS1.to_vec())
+        .exchange(&mut smartcard, true);
     assert!(status_code == iso7816::StatusCode::Ok as u16);
 
     // Authenticate
@@ -109,6 +108,29 @@ fn main() {
     }
 
     // Read and compare EF_SOD
+    // temp
+    let file_data = iso7816::secure_select_and_read_file(
+        &mut smartcard,
+        "EF.DG2",
+        true,
+        &mut ssc,
+        &ks_enc,
+        &ks_mac,
+    )
+    .unwrap();
+    let dg_info = icao9303::DATA_GROUPS.get("EF.DG2").unwrap();
+    let parse_result = (dg_info.parser)(file_data, &dg_info, true).unwrap();
+
+    let ef_dg2_file: types::EFDG2 = match parse_result {
+        types::ParsedDataGroup::EFDG2(ef_com_file) => ef_com_file,
+        _ => {
+            panic!("Expected EFDG2 but got {:x?}", parse_result);
+        }
+    };
+
+    let mut f = std::fs::File::create("EF.DG2.jpg").unwrap();
+    std::io::Write::write_all(&mut f, &ef_dg2_file.biometrics[0].data).unwrap();
+    f.sync_all().unwrap();
 
     drop(smartcard);
 }

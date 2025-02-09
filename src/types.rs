@@ -218,6 +218,27 @@ pub struct EFDG1 {
 }
 
 #[derive(Debug)]
+pub struct Biometric {
+    // ICAO 9303 part 10, edition 8, 4.7.2.1
+    // Biometric Header Template (BHT) + Biometric data (encoded according to Format Owner)
+    pub header_version: Option<Vec<u8>>,
+    pub biometric_type: Option<Vec<u8>>,
+    pub biometric_sub_type: Option<u8>,
+    pub creation_timestamp: Option<Vec<u8>>,
+    pub validity_period_from_through: Option<Vec<u8>>,
+    pub creator_of_biometric_data: Option<Vec<u8>>,
+    pub format_owner: Vec<u8>,
+    pub format_type: Vec<u8>,
+    pub data: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub struct EFDG2 {
+    // ICAO 9303 part 10, edition 8, 4.7.2
+    pub biometrics: Vec<Biometric>,
+}
+
+#[derive(Debug)]
 pub struct EFDG11 {
     // ICAO 9303 part 10, edition 8, 4.7.11
     pub full_name: Option<String>,
@@ -260,6 +281,7 @@ pub struct EFDG12 {
 pub enum ParsedDataGroup {
     EFCom(EFCom),
     EFDG1(EFDG1),
+    EFDG2(EFDG2),
     EFDG11(EFDG11),
     EFDG12(EFDG12),
 }

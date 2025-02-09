@@ -45,8 +45,6 @@ pub fn parser(
     data_group: &icao9303::DataGroup,
     print_data: bool,
 ) -> Option<types::ParsedDataGroup> {
-    debug!("Read file ({:?}b): {:x?}", data.len(), data);
-
     // Parse the base TLV
     let base_tlv = ber::Tlv::parse(&data).0.unwrap();
     assert!(helpers::get_tlv_tag(&base_tlv) == 0x6C);

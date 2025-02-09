@@ -332,6 +332,13 @@ pub fn secure_select_and_read_file(
             // We should account for u32 even tho its unlikely.
             // offset by 1 as we're skipping the initial tag.
             file_len = (1u32 + field_len as u32 + asn1_len) as u16;
+
+            if file_len > 10_000 {
+                info!(
+                    "<d>{} seems quite big ({}b), this may take a bit.</>",
+                    filename, file_len
+                );
+            }
         }
 
         debug!(

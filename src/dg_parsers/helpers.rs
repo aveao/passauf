@@ -1,8 +1,8 @@
 use iso7816_tlv::ber;
-use simplelog::info;
+use simplelog::{debug, info, warn};
 use std::collections::HashMap;
 
-use crate::helpers;
+use crate::{helpers, types};
 
 const SECTION_TITLE_PAD_TO_LEN: usize = 56;
 const PRINT_TITLE_PAD_TO_LEN: usize = 25;
@@ -22,6 +22,95 @@ pub(crate) fn tlv_get_bytes(tlvs: &HashMap<u16, &ber::Tlv>, tag: &u16) -> Option
         Some(data) => Some(helpers::get_tlv_value_bytes(data)),
         None => None,
     }
+}
+
+pub(crate) fn tlv_get_byte(tlvs: &HashMap<u16, &ber::Tlv>, tag: &u16) -> Option<u8> {
+    match tlvs.get(tag) {
+        Some(data) => Some(helpers::get_tlv_value_bytes(data)[0]),
+        None => None,
+    }
+}
+
+pub(crate) fn parse_biometric_info_template_group_template(
+    biometric_info_template_group_template_tlv: &ber::Tlv,
+) -> Vec<types::Biometric> {
+    let mut biometrics: Vec<types::Biometric> = vec![];
+
+    // 7F61 -> 02 (number of biometrics), 7F60 (template) -> A1 (header template), 5F2E (19794) / 7F2E (39794)
+    // if 7F2E -> A1 -> 64 (finger)/65 (face)/66 (iris)
+
+    let biometric_info_template_group_template_tlv_value =
+        helpers::get_tlv_constructed_value(&biometric_info_template_group_template_tlv);
+    let biometric_info_template_tlvs =
+        helpers::get_tlvs_by_tag(&biometric_info_template_group_template_tlv_value, 0x7F60);
+    debug!(
+        "biometric_info_template_tlvs: {:02x?}",
+        biometric_info_template_tlvs
+    );
+    for biometric_info_template in biometric_info_template_tlvs {
+        let tlv_value = helpers::get_tlv_constructed_value(&biometric_info_template);
+        let biometric_info_tlvs = helpers::sort_tlvs_by_tag(&tlv_value);
+        // Here should be 0xA1 (header template), plus data: 0x5F2E (ISO/IEC 19794-5) or 0x7F2E (ISO/IEC 39794)
+        let mut data: Vec<u8> = vec![];
+        if biometric_info_tlvs.contains_key(&0x5F2E) {
+            let iso_19794_data =
+                helpers::get_tlv_value_bytes(biometric_info_tlvs.get(&0x5F2E).unwrap());
+            // quick lazy implementation of ISO/IEC 19794
+            // Only allow 2005 variant (this is what ICAO 9303 requires for first biometric)
+            if iso_19794_data[4..8] != [0x30, 0x31, 0x30, 00] {
+                warn!(
+                    "Biometric has unsupported version, skipping: {:02x?}",
+                    &iso_19794_data[4..8]
+                );
+                continue;
+            }
+
+            let number_of_representations =
+                u16::from_be_bytes(iso_19794_data[12..14].try_into().unwrap());
+            if number_of_representations != 1 {
+                warn!("Expected one representation of biometric, but found {}. We can only dump the first one.", number_of_representations)
+            }
+            let rep_1_start = 14; // size of general header on ISO/IEC 19794-1:2006
+            let rep_1_length = u32::from_be_bytes(
+                iso_19794_data[rep_1_start..rep_1_start + 4]
+                    .try_into()
+                    .unwrap(),
+            );
+            let rep_1_feature_point_count = u16::from_be_bytes(
+                iso_19794_data[rep_1_start + 4..rep_1_start + 6]
+                    .try_into()
+                    .unwrap(),
+            );
+            let rep_1_header_length: u16 = 20 + (8 * rep_1_feature_point_count) + 12;
+            let rep_1_data = &iso_19794_data
+                [rep_1_start + rep_1_header_length as usize..rep_1_start + rep_1_length as usize];
+            data = rep_1_data.to_vec();
+        } else if biometric_info_tlvs.contains_key(&0x7F2E) {
+            // ICAO 9303 requires ISO/IEC 19794 for first biometric so this is low-priority
+            todo!();
+        } else {
+            warn!("Biometric info template does not contain data.");
+            continue;
+        }
+
+        let biometric_header_template =
+            helpers::get_tlv_constructed_value(biometric_info_tlvs.get(&0xA1).unwrap());
+        let biometric_header_tlvs = helpers::sort_tlvs_by_tag(&biometric_header_template);
+
+        let biometric = types::Biometric {
+            header_version: tlv_get_bytes(&biometric_header_tlvs, &0x80),
+            biometric_type: tlv_get_bytes(&biometric_header_tlvs, &0x81),
+            biometric_sub_type: tlv_get_byte(&biometric_header_tlvs, &0x82),
+            creation_timestamp: tlv_get_bytes(&biometric_header_tlvs, &0x83),
+            validity_period_from_through: tlv_get_bytes(&biometric_header_tlvs, &0x85),
+            creator_of_biometric_data: tlv_get_bytes(&biometric_header_tlvs, &0x86),
+            format_owner: tlv_get_bytes(&biometric_header_tlvs, &0x87).unwrap(),
+            format_type: tlv_get_bytes(&biometric_header_tlvs, &0x88).unwrap(),
+            data: data.clone(),
+        };
+        biometrics.push(biometric);
+    }
+    return biometrics;
 }
 
 /// Remove the < characters at the end of the given string.
