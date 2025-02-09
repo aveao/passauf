@@ -10,28 +10,32 @@ pub trait Smartcard: Drop {
 
 #[allow(drop_bounds)]
 pub trait InterfaceDevice: Drop {
-    fn connect(path: Option<&String>) -> impl InterfaceDevice;
+    fn connect(path: Option<&String>) -> Option<impl InterfaceDevice>;
     fn select(&mut self) -> Option<impl Smartcard>;
 }
 
+#[cfg(feature = "proxmark")]
 pub struct Proxmark14ASmartcard<'a> {
     interface: &'a mut ProxmarkInterface,
 }
 
+#[cfg(feature = "proxmark")]
 pub struct ProxmarkInterface {
     pub serial_port: Box<dyn SerialPort>,
 }
 
+#[cfg(feature = "proxmark")]
 impl Drop for ProxmarkInterface {
     fn drop(&mut self) {
         let _ = proxmark::quit_session(&mut self.serial_port);
     }
 }
 
+#[cfg(feature = "proxmark")]
 impl InterfaceDevice for ProxmarkInterface {
-    fn connect(path: Option<&String>) -> impl InterfaceDevice {
-        let port = proxmark::connect(path.unwrap()).unwrap();
-        return ProxmarkInterface { serial_port: port };
+    fn connect(path: Option<&String>) -> Option<impl InterfaceDevice> {
+        let port = proxmark::connect(path.unwrap()).ok()?;
+        return Some(ProxmarkInterface { serial_port: port });
     }
 
     fn select(&mut self) -> Option<impl Smartcard> {
@@ -41,12 +45,14 @@ impl InterfaceDevice for ProxmarkInterface {
     }
 }
 
+#[cfg(feature = "proxmark")]
 impl Drop for Proxmark14ASmartcard<'_> {
     fn drop(&mut self) {
         let _ = proxmark::hf_drop_field(&mut self.interface.serial_port);
     }
 }
 
+#[cfg(feature = "proxmark")]
 impl Smartcard for Proxmark14ASmartcard<'_> {
     fn exchange_command(&mut self, data: &Vec<u8>) -> Option<Vec<u8>> {
         let response =

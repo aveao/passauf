@@ -3,12 +3,14 @@ use cbc::cipher::{
     KeyInit, KeyIvInit,
 };
 use phf::phf_map;
+use rand::Rng;
 use retail_mac::{Mac, RetailMac};
 use sha1::{Digest, Sha1};
-use simplelog::debug;
+use simplelog::{debug, info};
 
-use crate::dg_parsers;
+use crate::smartcard_abstractions::Smartcard;
 use crate::types;
+use crate::{dg_parsers, helpers, iso7816};
 
 type RetailMacDes = RetailMac<des::Des>;
 type TDesCbcEnc = cbc::Encryptor<des::TdesEde2>;
@@ -253,4 +255,74 @@ pub fn calculate_bac_session_keys(
 pub fn calculate_initial_ssc_bac(rnd_ic: &[u8], rnd_ifd: &[u8]) -> u64 {
     let ssc_bytes = vec![&rnd_ic[4..8], &rnd_ifd[4..8]].concat();
     return u64::from_be_bytes(ssc_bytes.try_into().unwrap());
+}
+
+/// Authenticate with Basic Access Control
+pub fn do_bac_authentication(
+    port: &mut impl Smartcard,
+    document_number: &String,
+    date_of_birth: &String,
+    date_of_expiry: &String,
+) -> (Vec<u8>, Vec<u8>, u64) {
+    info!("<d>Starting Basic Access Control</>");
+
+    // Get RND.IC by calling GET_CHALLENGE.
+    let mut apdu = iso7816::apdu_get_challenge();
+    let (rapdu, _) = apdu.exchange(port, true);
+    // get the first 8 bytes of the response, which is the actual response
+    // (rest is SW and checksum)
+    let rnd_ic = &rapdu[0..8];
+
+    // Generate RND.IFD
+    let mut rnd_ifd = [0u8; 8];
+    rand::rng().fill(&mut rnd_ifd[..]);
+
+    // Generate keying material K.IFD
+    let mut k_ifd = [0u8; 16];
+    rand::rng().fill(&mut k_ifd[..]);
+
+    // Calculate K.ENC, E.IFD and M.IFD
+    let (k_enc, e_ifd, m_ifd) = calculate_bac_eifd_and_mifd(
+        rnd_ic,
+        &rnd_ifd,
+        &k_ifd,
+        document_number,
+        date_of_birth,
+        date_of_expiry,
+    );
+
+    // Do EXTERNAL_AUTHENTICATION with the key and MAC we calculated.
+    let external_auth_data = vec![e_ifd, m_ifd].concat();
+    let mut apdu = iso7816::apdu_external_authentication(external_auth_data);
+    let (rapdu, _) = apdu.exchange(port, true);
+    info!("Successfully authenticated!");
+
+    // Calculate session keys
+    let (ks_enc, ks_mac) = calculate_bac_session_keys(
+        &rapdu[0..40],
+        k_enc.as_slice(),
+        rnd_ifd.as_slice(),
+        k_ifd.as_slice(),
+    );
+
+    // Calculate session counter
+    let ssc = calculate_initial_ssc_bac(rnd_ic, &rnd_ifd);
+
+    return (ks_enc, ks_mac, ssc);
+}
+
+pub fn do_authentication(
+    pace_available: bool,
+    smartcard: &mut impl Smartcard,
+    document_number: &String,
+    date_of_birth: &String,
+    date_of_expiry: &String,
+) -> (Vec<u8>, Vec<u8>, u64) {
+    // TODO: check if reading things without auth is possible, GH#7
+    // TODO: make the return type of this an AuthState object,
+    // have it state if we need secure comms and what arguments are relevant
+    if pace_available {
+        info!("PACE is available on this document, but it's not implemented by passauf yet.");
+    }
+    return do_bac_authentication(smartcard, document_number, date_of_birth, date_of_expiry);
 }
