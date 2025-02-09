@@ -1,6 +1,7 @@
 use crate::icao9303;
 use crate::iso7816;
 use crate::proxmark;
+use crate::smartcard_abstractions::Smartcard;
 use iso7816::StatusCode;
 use iso7816_tlv::ber;
 use simplelog::{debug, info, warn};
@@ -72,12 +73,12 @@ pub fn sort_tlvs_by_tag(tlvs: &Vec<ber::Tlv>) -> HashMap<u16, &ber::Tlv> {
 }
 
 pub fn exchange_apdu(
-    port: &mut Box<dyn serialport::SerialPort>,
+    smartcard: &mut impl Smartcard,
     apdu: &mut iso7816::ApduCommand,
     assert_on_status: bool,
-) -> (proxmark::PM3PacketResponseNG, u16) {
-    let (response, _, status_code) = secure_exchange_apdu(
-        port,
+) -> (Vec<u8>, u16) {
+    let (rapdu, status_code) = secure_exchange_apdu(
+        smartcard,
         apdu,
         assert_on_status,
         false,
@@ -85,22 +86,21 @@ pub fn exchange_apdu(
         &vec![],
         &vec![],
     );
-    return (response, status_code);
+    return (rapdu, status_code);
 }
 
 pub fn secure_exchange_apdu(
-    port: &mut Box<dyn serialport::SerialPort>,
+    smartcard: &mut impl Smartcard,
     apdu: &mut iso7816::ApduCommand,
     assert_on_status: bool,
     secure_comms: bool,
     ssc: &mut u64,
     ks_enc: &Vec<u8>,
     ks_mac: &Vec<u8>,
-) -> (proxmark::PM3PacketResponseNG, Vec<u8>, u16) {
+) -> (Vec<u8>, u16) {
     let mut done_exchanging = false;
-    // initializing with an empty response here so that compiler doesn't complain
-    let mut response = proxmark::PM3PacketResponseNG::empty();
-    let mut apdu_data: Vec<u8> = vec![];
+    let mut rapdu_data: Vec<u8> = vec![];
+    let mut status_code_bytes: Vec<u8> = vec![];
     while !done_exchanging {
         debug!("> APDU (secure: {:?}): {:x?}", secure_comms, apdu);
         let apdu_bytes = if secure_comms {
@@ -108,24 +108,25 @@ pub fn secure_exchange_apdu(
         } else {
             apdu.serialize()
         };
-        response = proxmark::exchange_apdu_14a(port, &apdu_bytes, false).unwrap();
-        let status_code_bytes = iso7816::get_status_code_bytes(&response.data);
+
+        rapdu_data = smartcard.exchange_apdu(&apdu_bytes).unwrap();
+        status_code_bytes = iso7816::get_status_code_bytes(&rapdu_data);
 
         // - 4 bytes for status code and and hash
         if secure_comms {
             match iso7816::parse_secure_rapdu(
-                &response.data[..response.data.len() - 4],
+                &rapdu_data[..rapdu_data.len() - 4],
                 ssc,
                 ks_enc,
                 ks_mac,
             ) {
                 Some(data) => {
-                    apdu_data = data;
+                    rapdu_data = data;
                 }
                 None => {}
             };
         } else {
-            apdu_data = response.data[..response.data.len() - 4].to_vec();
+            rapdu_data = rapdu_data[..rapdu_data.len() - 4].to_vec();
         }
 
         // ISO/IEC 7816-4 says:
@@ -144,7 +145,7 @@ pub fn secure_exchange_apdu(
     }
 
     // TODO: validate hash
-    let status_code = iso7816::get_status_code(&response.data);
+    let status_code = u16::from_be_bytes(status_code_bytes.try_into().unwrap());
 
     if assert_on_status {
         // Intentionally not checking 61 here.
@@ -152,18 +153,15 @@ pub fn secure_exchange_apdu(
         assert!(status_code == StatusCode::Ok as u16);
     }
 
-    return (response, apdu_data, status_code);
+    return (rapdu_data, status_code);
 }
 
-pub fn select_and_read_file(
-    port: &mut Box<dyn serialport::SerialPort>,
-    filename: &str,
-) -> Option<Vec<u8>> {
-    return secure_select_and_read_file(port, filename, false, &mut 0, &vec![], &vec![]);
+pub fn select_and_read_file(smartcard: &mut impl Smartcard, filename: &str) -> Option<Vec<u8>> {
+    return secure_select_and_read_file(smartcard, filename, false, &mut 0, &vec![], &vec![]);
 }
 
 pub fn secure_select_and_read_file(
-    port: &mut Box<dyn serialport::SerialPort>,
+    smartcard: &mut impl Smartcard,
     filename: &str,
     secure_comms: bool,
     ssc: &mut u64,
@@ -174,8 +172,15 @@ pub fn secure_select_and_read_file(
 
     info!("<d>Selecting {} ({})</>", filename, dg_info.description);
     let mut apdu = iso7816::apdu_select_file_by_ef(dg_info.file_id);
-    let (_, _, status_code) =
-        secure_exchange_apdu(port, &mut apdu, false, secure_comms, ssc, ks_enc, ks_mac);
+    let (_, status_code) = secure_exchange_apdu(
+        smartcard,
+        &mut apdu,
+        false,
+        secure_comms,
+        ssc,
+        ks_enc,
+        ks_mac,
+    );
 
     if status_code != StatusCode::Ok as u16 {
         warn!("{} not found (this is probably fine).", filename);
@@ -188,8 +193,15 @@ pub fn secure_select_and_read_file(
     let mut file_len: u16 = 0;
     while bytes_to_read > 0 {
         let mut apdu = iso7816::apdu_read_binary(total_data.len() as u16, bytes_to_read);
-        let (_, apdu_data, status_code) =
-            secure_exchange_apdu(port, &mut apdu, false, secure_comms, ssc, ks_enc, ks_mac);
+        let (apdu_data, status_code) = secure_exchange_apdu(
+            smartcard,
+            &mut apdu,
+            false,
+            secure_comms,
+            ssc,
+            ks_enc,
+            ks_mac,
+        );
         let status_code_bytes = status_code.to_be_bytes();
 
         // Unfortunately, ICAO 9303 does not allow us to read file sizes.
