@@ -1,5 +1,6 @@
 use asn1;
 use phf::phf_map;
+use strum::FromRepr;
 
 use crate::dg_parsers::helpers as dg_helpers;
 
@@ -217,6 +218,25 @@ pub struct EFDG1 {
     pub raw_mrz: String,
 }
 
+#[derive(Debug, FromRepr, PartialEq, Clone, Copy)]
+pub enum BiometricImageFormat {
+    // ISO/IEC 19794:5-2005, 5.7.2
+    Jpeg = 0x00,
+    Jpeg2000 = 0x01,
+    Reserved = 0x02,
+}
+
+impl BiometricImageFormat {
+    pub fn get_extension(&self) -> String {
+        match &self {
+            BiometricImageFormat::Jpeg => ".jpeg",
+            BiometricImageFormat::Jpeg2000 => ".jp2",
+            BiometricImageFormat::Reserved => ".image_bin",
+        }
+        .to_string()
+    }
+}
+
 #[derive(Debug)]
 pub struct Biometric {
     // ICAO 9303 part 10, edition 8, 4.7.2.1
@@ -230,6 +250,7 @@ pub struct Biometric {
     pub format_owner: Vec<u8>,
     pub format_type: Vec<u8>,
     pub data: Vec<u8>,
+    pub image_format: BiometricImageFormat,
 }
 
 #[derive(Debug)]

@@ -128,9 +128,11 @@ fn main() {
         }
     };
 
-    let mut f = std::fs::File::create("EF.DG2.jpg").unwrap();
+    let filename = "EF.DG2".to_owned() + &ef_dg2_file.biometrics[0].image_format.get_extension();
+    let mut f = std::fs::File::create(&filename).unwrap();
     std::io::Write::write_all(&mut f, &ef_dg2_file.biometrics[0].data).unwrap();
     f.sync_all().unwrap();
+    info!("Saved EF_DG2 image to {}.", &filename);
 
     drop(smartcard);
 }
