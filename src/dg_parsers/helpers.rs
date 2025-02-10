@@ -51,7 +51,7 @@ pub(crate) fn parse_biometric_info_template_group_template(
         let tlv_value = helpers::get_tlv_constructed_value(&biometric_info_template);
         let biometric_info_tlvs = helpers::sort_tlvs_by_tag(&tlv_value);
         // Here should be 0xA1 (header template), plus data: 0x5F2E (ISO/IEC 19794-5) or 0x7F2E (ISO/IEC 39794)
-        let mut data: Vec<u8> = vec![];
+        let image_data: Vec<u8>;
         let mut image_format: types::BiometricImageFormat = types::BiometricImageFormat::Reserved;
         if biometric_info_tlvs.contains_key(&0x5F2E) {
             let iso_19794_data =
@@ -94,7 +94,7 @@ pub(crate) fn parse_biometric_info_template_group_template(
                 None => {}
             }
             // 36 + (8 * rep_1_feature_point_count)
-            data = rep_1_data.to_vec();
+            image_data = rep_1_data.to_vec();
         } else if biometric_info_tlvs.contains_key(&0x7F2E) {
             // ICAO 9303 requires ISO/IEC 19794 for first biometric so this is low-priority
             todo!();
@@ -116,7 +116,7 @@ pub(crate) fn parse_biometric_info_template_group_template(
             creator_of_biometric_data: tlv_get_bytes(&biometric_header_tlvs, &0x86),
             format_owner: tlv_get_bytes(&biometric_header_tlvs, &0x87).unwrap(),
             format_type: tlv_get_bytes(&biometric_header_tlvs, &0x88).unwrap(),
-            data: data.clone(),
+            data: image_data.clone(),
             image_format: image_format,
         };
         biometrics.push(biometric);

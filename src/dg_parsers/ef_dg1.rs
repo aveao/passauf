@@ -8,7 +8,7 @@ use simplelog::{debug, info};
 impl types::TD3Mrz {
     #[cfg(feature = "cli")]
     pub fn fancy_print(&self) {
-        dg_helpers::print_string_element("Document Size", &"TD3".to_string());
+        dg_helpers::print_string_element("Document Size", &"TD3 (Passport-size)".to_string());
         dg_helpers::print_string_element(
             "Document Type",
             &dg_helpers::parse_mrz_document_code(&self.document_code, &self.issuing_state),
@@ -24,6 +24,13 @@ impl types::TD3Mrz {
             "Optional elements",
             &self.personal_number_or_optional_data_elements,
         );
+        let checksum_result = self.validate_check_digits(true);
+        let checksum_text = match checksum_result.iter().all(|&val| val == true) {
+            true => "</><green>All valid!</>",
+            false => "</><red>Mismatches found!</>",
+        }
+        .to_string();
+        dg_helpers::print_string_element("MRZ Checksums", &checksum_text);
     }
 }
 

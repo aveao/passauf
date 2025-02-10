@@ -7,9 +7,9 @@ mod proxmark;
 mod smartcard_abstractions;
 mod types;
 
-use clap::{CommandFactory, Parser};
+use clap::Parser;
 use simplelog::{info, warn, CombinedLogger, TermLogger};
-use smartcard_abstractions::{connect_to_interface_by_name, InterfaceDevice, ProxmarkInterface};
+use smartcard_abstractions::{connect_to_interface_by_name, InterfaceDevice};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]

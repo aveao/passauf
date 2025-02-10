@@ -1,8 +1,9 @@
 use asn1;
 use phf::phf_map;
+use simplelog::warn;
 use strum::FromRepr;
 
-use crate::dg_parsers::helpers as dg_helpers;
+use crate::{dg_parsers::helpers as dg_helpers, icao9303};
 
 // handy: https://oid-rep.orange-labs.fr/get/0.4.0.127.0.7.2.2.2
 pub static PACE_DOMAIN_PARAMETERS_OIDS: phf::Map<&'static str, &'static asn1::ObjectIdentifier> = phf_map! {
@@ -351,6 +352,24 @@ pub struct TD3Mrz {
     pub composite_check_digit: char,
 }
 
+fn validate_field_check_digit(
+    field: &String,
+    check_digit: &char,
+    verbose_as: Option<String>,
+) -> bool {
+    let calculated_check_digit = icao9303::calculate_check_digit(&field);
+    let check_digit_valid = *check_digit == calculated_check_digit;
+    if !check_digit_valid && verbose_as.is_some() {
+        warn!(
+            "{} checksum is invalid (doc={}, calculated={}).",
+            verbose_as.unwrap(),
+            check_digit,
+            calculated_check_digit
+        );
+    }
+    return check_digit_valid;
+}
+
 impl TD3Mrz {
     pub fn deserialize(input: &String) -> Option<TD3Mrz> {
         if input.len() != 88 {
@@ -377,7 +396,57 @@ impl TD3Mrz {
         });
     }
 
-    // pub fn validate_check_digits(&self¸, verbose: bool) -> Vec<bool> {
+    pub fn validate_check_digits(&self, verbose: bool) -> Vec<bool> {
+        let document_number_valid = validate_field_check_digit(
+            &self.document_number,
+            &self.document_number_check_digit,
+            Some("Document number".to_string()),
+        );
+        let date_of_birth_valid = validate_field_check_digit(
+            &self.date_of_birth,
+            &self.date_of_birth_check_digit,
+            Some("Date of birth".to_string()),
+        );
+        let date_of_expiry_valid = validate_field_check_digit(
+            &self.date_of_expiry,
+            &self.date_of_expiry_check_digit,
+            Some("Date of expiry".to_string()),
+        );
 
-    // }
+        let mut personal_number_or_optional_data_elements_valid = true;
+        // If it's empty, then the check digit can be empty.
+        if self.personal_number_or_optional_data_elements.len() != 0 {
+            personal_number_or_optional_data_elements_valid = validate_field_check_digit(
+                &self.personal_number_or_optional_data_elements,
+                &self.personal_number_or_optional_data_elements_check_digit,
+                Some("Personal number or optional data elements".to_string()),
+            );
+        } else if verbose {
+            warn!("Personal number or optional data elements is empty, ignoring check digit.");
+        }
+
+        // ICAO 9303 p4, edition 8, 4.2.2.2 says:
+        // "Composite check digit for characters of machine readable data of the lower line
+        // in positions 1 to 10, 14 to 20 and 22 to 43, including values for letters that are
+        // a part of the number fields and their check digits."
+        let composite_base = vec![
+            &self.raw_mrz[44..44 + 10],
+            &self.raw_mrz[44 + 13..44 + 20],
+            &self.raw_mrz[44 + 21..44 + 43],
+        ]
+        .concat();
+        let composite_valid = validate_field_check_digit(
+            &composite_base,
+            &self.composite_check_digit,
+            Some("Composite".to_string()),
+        );
+
+        return vec![
+            document_number_valid,
+            date_of_birth_valid,
+            date_of_expiry_valid,
+            personal_number_or_optional_data_elements_valid,
+            composite_valid,
+        ];
+    }
 }

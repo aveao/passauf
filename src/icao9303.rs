@@ -65,7 +65,7 @@ pub struct DataGroup {
 ///
 /// Can be used for document number, DOB, Expiry and MRZ text
 /// Accepts a String of A-Z 0-9 and <
-pub fn calculate_check_digit(text: &String) -> u8 {
+pub fn calculate_check_digit(text: &String) -> char {
     let mrz_weights = [7, 3, 1];
     // MRZ isn't supposed to have lowercase characters, but user input is user input.
     let uppercase_text = text.to_uppercase();
@@ -85,7 +85,7 @@ pub fn calculate_check_digit(text: &String) -> u8 {
         check_digit += char_value * mrz_weights[i % 3];
         check_digit %= 10;
     }
-    return check_digit;
+    return char::from_digit(check_digit as u32, 10).unwrap();
 }
 
 /// Appends MRZ check digits to a given String
