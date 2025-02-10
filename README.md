@@ -53,6 +53,7 @@ I've only tested this code with an RDV4 running [the Iceman firmware](https://gi
 Here's the list of features I plan to support (checkmarks indicate if it is implemented):
 
 - [x] USB serial communications with a proxmark3
+    - [x] Automatically detecting the serial port when not supplied.
 - [ ] Bluetooth BSUART communications with a proxmark3
     - (This requires implementing proper CRC support alongside more generous timeouts)
 - [x] NG and MIX format of commands and responses
@@ -65,12 +66,12 @@ Here's the list of features I plan to support (checkmarks indicate if it is impl
 - [x] ISO/IEC 14443b support (`CMD_HF_ISO14443B_COMMAND`)
     - [x] Adjacent helper functions
     - [ ] Ability to select cards via different selection methods
-- [ ] Some sort of way to automatically detect 14a vs 14b?
+- [x] Some sort of way to automatically detect 14a vs 14b? -> Implemented in the abstraction
 - [ ] Support for `CMD_WTX` (wait time extension)
     - Unclear if this is necessary for this project, but it seems useful to have.
-- [ ] Better error handling
-    - [ ] Status code parsing past OK
-    - [ ] Graceful error handling
+- [x] Better error handling
+    - [x] Status code parsing past OK
+    - [x] Graceful error handling
 
 ## Terminology
 
