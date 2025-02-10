@@ -1,6 +1,6 @@
 use iso7816_tlv::ber;
 use simplelog::{debug, info, warn};
-use std::collections::HashMap;
+use std::{cmp::max, collections::HashMap};
 
 use crate::{helpers, types};
 
@@ -260,7 +260,8 @@ pub(crate) fn pad_section_subtitle(text: &str) -> String {
 }
 
 fn pad_with_ellipses(text: &str) -> String {
-    let pad_len = PRINT_TITLE_PAD_TO_LEN - text.len();
+    // max here is to avoid overflowing
+    let pad_len = max(PRINT_TITLE_PAD_TO_LEN, text.len()) - text.len();
     return format!("<b>{}</>{:.<pad_len$}", text, "");
 }
 
@@ -279,6 +280,12 @@ pub(crate) fn parse_mrz_document_code(document_code: &String, country_code: &Str
     if document_code.len() != 2 {
         return document_code.to_string();
     }
+    // ICAO 9303 part 5, edition 8, 4.2.2.3 Note k:
+    // "The first character shall be A, C or I. Historically these three characters were chosen for their ease of
+    // recognition in the OCR-B character set. The second character shall be at the discretion of the issuing State or
+    // organization except that i) V shall not be used, ii) I shall not be used after A (i.e. AI), and iii) C shall not be used
+    // after A (i.e. AC) except in the crew member certificate."
+
     match document_code.as_str() {
         "C<" => {
             if country_code == "ITA" {
@@ -305,6 +312,9 @@ pub(crate) fn parse_mrz_document_code(document_code: &String, country_code: &Str
                 return "Residence Permit Card".to_string();
             }
         }
+        "AI" | "CV" | "AC" => {
+            return format!("{} (Disallowed by ICAO 9303, Part 5)", document_code);
+        }
         _ => {}
     }
 
@@ -312,8 +322,11 @@ pub(crate) fn parse_mrz_document_code(document_code: &String, country_code: &Str
         'P' => {
             return "Passport".to_string();
         }
-        'I' => {
-            return "ID Card (probably)".to_string();
+        'I' | 'C' => {
+            return "ID Card (likely)".to_string();
+        }
+        'V' => {
+            return format!("{} (Disallowed by ICAO 9303, Part 5)", document_code);
         }
         _ => {}
     }
