@@ -1,7 +1,8 @@
 use super::helpers::{merge_len_and_ng, split_len_and_ng};
 use super::types::{
-    Command, PM3PacketCommandInternal, PM3PacketResponseMIXInternal, PM3PacketResponseNG,
-    PM3PacketResponseNGInternal,
+    CRCMismatchError, Command, DataTooLongError, PM3PacketCommandInternal,
+    PM3PacketResponseMIXInternal, PM3PacketResponseNG, PM3PacketResponseNGInternal,
+    PreambleMismatchError, UnexpectedResponse,
 };
 use bincode;
 use core::mem;
@@ -63,11 +64,18 @@ pub fn send_and_get_command(
     let response = get_response(port, cmd)?;
 
     if response.cmd == Command::DebugPrintString as u16 {
-        warn!("{}", str::from_utf8(&response.data).unwrap());
+        warn!("{}", str::from_utf8(&response.data)?);
     }
 
     let expected_command = (if ng { cmd } else { Command::Ack }) as u16;
-    assert!(response.cmd == expected_command);
+    if response.cmd != expected_command {
+        return Err(Box::new(UnexpectedResponse {
+            additional_text: format!(
+                "Command we received in response (0x{:04x}) does not match the one we sent (0x{:04x}).",
+                response.cmd, expected_command
+            ),
+        }));
+    }
 
     return Ok(response);
 }
@@ -78,9 +86,15 @@ pub fn send_command(
     data: &Vec<u8>,
     ng: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Ensure that we never send a message that's too long
-    assert!(data.len() <= CMD_MAX_DATA_SIZE);
+    // Ensure that we never try to send a message that's too long
+    if data.len() > CMD_MAX_DATA_SIZE {
+        return Err(Box::new(DataTooLongError {
+            found_len: data.len(),
+            max_len: CMD_MAX_DATA_SIZE,
+        }));
+    }
 
+    // Form the command
     let command = PM3PacketCommandInternal {
         cmd: cmd as u16,
         length_and_ng: merge_len_and_ng(data.len() as u16, ng),
@@ -114,11 +128,20 @@ fn get_response(
     while total_read < expected_length {
         let read_size = port.read(&mut serial_buf[total_read..])?;
         if total_read == 0 {
-            // assert that we're indeed at the start of the response
-            assert!(serial_buf[0..4] == RESPONSENG_PREAMBLE_MAGIC.to_le_bytes().to_vec());
+            // ensure that we're at the start of the response
+            let first_four_bytes = &serial_buf[0..4];
+            let expected_bytes = RESPONSENG_PREAMBLE_MAGIC.to_le_bytes().to_vec();
+            if first_four_bytes != expected_bytes {
+                return Err(Box::new(UnexpectedResponse {
+                    additional_text: format!(
+                        "Data on our location in the serial buf ({:02x?}) does not match preamble ({:02x?}).",
+                        first_four_bytes, expected_bytes
+                    ),
+                }));
+            }
 
             // split len and ng, as they're 15 and 1 bit respectively.
-            let length_and_ng = u16::from_le_bytes(serial_buf[4..6].try_into().unwrap());
+            let length_and_ng = u16::from_le_bytes(serial_buf[4..6].try_into()?);
             (data_length, ng) = split_len_and_ng(length_and_ng);
 
             // calculate the expected length so that we can read the entire response.
@@ -134,7 +157,7 @@ fn get_response(
         &serial_buf[0..total_read]
     );
 
-    // parse arg0/1/2 or not based on if we're on a NG command
+    // parse arg0/1/2 or not based on if we're on a NG command2
     let response = if ng {
         map_ng_to_packet_response(serial_buf, data_length, sent_cmd)
     } else {
@@ -143,20 +166,22 @@ fn get_response(
 
     debug!("< response: {:02x?}", response);
 
-    return Ok(response);
+    return Ok(response?);
 }
 
 fn map_ng_to_packet_response(
     serial_buf: Vec<u8>,
     data_length: u16,
     sent_cmd: Command,
-) -> PM3PacketResponseNG {
+) -> Result<PM3PacketResponseNG, Box<dyn std::error::Error>> {
     let mut data_length = data_length;
     let mut data_offset = mem::size_of::<PM3PacketResponseNGInternal>();
-    let partial_response: PM3PacketResponseNGInternal = bincode::deserialize(&serial_buf).unwrap();
-    assert!(partial_response.magic == RESPONSENG_PREAMBLE_MAGIC);
-
+    let partial_response: PM3PacketResponseNGInternal = bincode::deserialize(&serial_buf)?;
     trace!("< partial_response: {:02x?}", partial_response);
+
+    if partial_response.magic != RESPONSENG_PREAMBLE_MAGIC {
+        return Err(Box::new(PreambleMismatchError {}));
+    }
 
     // This is only here (not in MIX) because 14b is an NG command only.
     if sent_cmd == Command::HfIso14443BCommand {
@@ -167,10 +192,13 @@ fn map_ng_to_packet_response(
 
     let data_end = data_offset + data_length as usize;
     let data = serial_buf[data_offset..data_end].to_vec();
-    let crc = u16::from_le_bytes(serial_buf[data_end..data_end + 2].try_into().unwrap());
-    assert!(crc == RESPONSENG_POSTAMBLE_MAGIC);
+    let crc = u16::from_le_bytes(serial_buf[data_end..data_end + 2].try_into()?);
 
-    return PM3PacketResponseNG {
+    if crc != RESPONSENG_POSTAMBLE_MAGIC {
+        return Err(Box::new(CRCMismatchError {}));
+    }
+
+    return Ok(PM3PacketResponseNG {
         length: data_length,
         ng: true,
         status: partial_response.status,
@@ -180,19 +208,21 @@ fn map_ng_to_packet_response(
         arg0: 0,
         arg1: 0,
         arg2: 0,
-    };
+    });
 }
 
 fn map_mix_to_packet_response(
     serial_buf: Vec<u8>,
     data_length: u16,
     sent_cmd: Command,
-) -> PM3PacketResponseNG {
+) -> Result<PM3PacketResponseNG, Box<dyn std::error::Error>> {
     let data_offset = mem::size_of::<PM3PacketResponseMIXInternal>();
-    let partial_response: PM3PacketResponseMIXInternal = bincode::deserialize(&serial_buf).unwrap();
-    assert!(partial_response.magic == RESPONSENG_PREAMBLE_MAGIC);
-
+    let partial_response: PM3PacketResponseMIXInternal = bincode::deserialize(&serial_buf)?;
     trace!("< partial_response: {:02x?}", partial_response);
+
+    if partial_response.magic != RESPONSENG_PREAMBLE_MAGIC {
+        return Err(Box::new(PreambleMismatchError {}));
+    }
 
     // - 24 here as 3x u64s for the args
     let actual_data_length: u16 = match sent_cmd {
@@ -204,14 +234,13 @@ fn map_mix_to_packet_response(
     let data_field_end = data_offset + data_length as usize - 24 as usize;
     let actual_data_end = data_offset + actual_data_length as usize;
     let data = serial_buf[data_offset..actual_data_end].to_vec();
-    let crc = u16::from_le_bytes(
-        serial_buf[data_field_end..data_field_end + 2]
-            .try_into()
-            .unwrap(),
-    );
-    assert!(crc == RESPONSENG_POSTAMBLE_MAGIC);
+    let crc = u16::from_le_bytes(serial_buf[data_field_end..data_field_end + 2].try_into()?);
 
-    return PM3PacketResponseNG {
+    if crc != RESPONSENG_POSTAMBLE_MAGIC {
+        return Err(Box::new(CRCMismatchError {}));
+    }
+
+    return Ok(PM3PacketResponseNG {
         length: data_length,
         ng: false,
         status: partial_response.status,
@@ -221,5 +250,5 @@ fn map_mix_to_packet_response(
         arg2: partial_response.arg2,
         cmd: partial_response.cmd,
         data: data,
-    };
+    });
 }

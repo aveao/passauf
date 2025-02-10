@@ -1,7 +1,7 @@
 use super::base_commands;
 use super::comms::send_and_get_command;
-use super::helpers::convert_mix_args_to_ng;
-use super::types::{CannotSelectError, Command, PM3PacketResponseNG, Status};
+use super::helpers::{check_response_status, convert_mix_args_to_ng};
+use super::types::{CannotSelectError, Command, PM3PacketResponseNG};
 use bitflags::bitflags;
 
 bitflags! {
@@ -34,7 +34,7 @@ pub fn exchange_command_14a(
     let full_data = convert_mix_args_to_ng(data, u64::from(flags), data.len() as u64 & 0x1FF, 0);
     let response = send_and_get_command(port, Command::HfIso14443AReader, &full_data, false)?;
 
-    assert!(response.status == Status::Success as i8);
+    check_response_status(response.status)?;
     return Ok(response);
 }
 
@@ -69,6 +69,5 @@ pub fn exchange_apdu_14a(
     let flags = ISO14ACommand::APDU | ISO14ACommand::NO_DISCONNECT;
     let response = exchange_command_14a(port, data, flags.bits())?;
 
-    assert!(response.status == Status::Success as i8);
     return Ok(response);
 }

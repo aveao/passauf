@@ -1,5 +1,6 @@
 use super::comms::{open_serial_comms, send_and_get_command, send_command};
-use super::types::{Command, Status};
+use super::helpers::check_response_status;
+use super::types::{Command, UnexpectedResponse};
 
 const SUPPORTED_CAPABILITIES_VERSION: u8 = 6;
 
@@ -20,8 +21,15 @@ pub fn ping(port: &mut Box<dyn serialport::SerialPort>) -> Result<(), Box<dyn st
     }
 
     let response = send_and_get_command(port, Command::Ping, &data, true)?;
-    assert!(response.status == Status::Success as i8);
-    assert!(response.data == data);
+    check_response_status(response.status)?;
+    if response.data != data {
+        return Err(Box::new(UnexpectedResponse {
+            additional_text: format!(
+                "Ping response ({:02x?}) does not match sent value ({:02x?}).",
+                &response.data, &data
+            ),
+        }));
+    }
     return Ok(());
 }
 
@@ -30,8 +38,15 @@ pub fn check_capabilities(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let response = send_and_get_command(port, Command::Capabilities, &vec![], true)?;
 
-    assert!(response.status == Status::Success as i8);
-    assert!(response.data[0] == SUPPORTED_CAPABILITIES_VERSION);
+    check_response_status(response.status)?;
+    if response.data[0] != SUPPORTED_CAPABILITIES_VERSION {
+        return Err(Box::new(UnexpectedResponse {
+            additional_text: format!(
+                "Supported capabilities ({}) does not match our supported version ({}).",
+                response.data[0], SUPPORTED_CAPABILITIES_VERSION
+            ),
+        }));
+    }
     return Ok(());
 }
 

@@ -111,14 +111,12 @@ impl Smartcard for Proxmark14ASmartcard<'_> {
     fn exchange_command(&mut self, data: &Vec<u8>) -> Option<Vec<u8>> {
         let response =
             proxmark::exchange_command_14a(&mut self.interface.serial_port, data, 0).ok()?;
-        // TODO: check proxmark error state here
         return Some(response.data);
     }
 
     fn exchange_apdu(&mut self, data: &Vec<u8>) -> Option<Vec<u8>> {
         let response =
             proxmark::exchange_apdu_14a(&mut self.interface.serial_port, data, false).ok()?;
-        // TODO: check proxmark error state here
         return Some(response.data);
     }
 }
@@ -136,14 +134,12 @@ impl Smartcard for Proxmark14BSmartcard<'_> {
     fn exchange_command(&mut self, data: &Vec<u8>) -> Option<Vec<u8>> {
         let response =
             proxmark::exchange_command_14b(&mut self.interface.serial_port, data, 0, 0).ok()?;
-        // TODO: check proxmark error state here
         return Some(response.data);
     }
 
     fn exchange_apdu(&mut self, data: &Vec<u8>) -> Option<Vec<u8>> {
         let response =
             proxmark::exchange_apdu_14b(&mut self.interface.serial_port, data, false).ok()?;
-        // TODO: check proxmark error state here
         return Some(response.data);
     }
 }

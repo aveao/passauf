@@ -1,5 +1,6 @@
 use super::comms::send_and_get_command;
-use super::types::{Command, PM3PacketResponseNG, Status};
+use super::helpers::check_response_status;
+use super::types::{Command, PM3PacketResponseNG};
 use bitflags::bitflags;
 use simplelog::debug;
 
@@ -41,7 +42,7 @@ pub fn switch_off_field_14b(
     let data = serialize_14b_command(ISO14BCommand::DISCONNECT.bits(), 0, &vec![]);
     let response = send_and_get_command(port, Command::HfIso14443BCommand, &data, true)?;
 
-    assert!(response.status == Status::Success as i8);
+    check_response_status(response.status)?;
     return Ok(());
 }
 
@@ -54,7 +55,7 @@ pub fn exchange_command_14b(
     let raw_data = serialize_14b_command(flags, timeout, data);
     let response = send_and_get_command(port, Command::HfIso14443BCommand, &raw_data, true)?;
 
-    assert!(response.status == Status::Success as i8);
+    check_response_status(response.status)?;
     return Ok(response);
 }
 
@@ -70,7 +71,6 @@ pub fn select_14b(
         switch_off_field_14b(port)?;
     }
 
-    assert!(response.status == 0);
     return Ok(response);
 }
 
@@ -87,6 +87,5 @@ pub fn exchange_apdu_14b(
     // this magic number is from pm3 client :D
     let response = exchange_command_14b(port, data, flags.bits(), 420000)?;
 
-    assert!(response.status == Status::Success as i8);
     return Ok(response);
 }

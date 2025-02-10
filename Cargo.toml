@@ -22,7 +22,7 @@ des = "0.9.0-pre.2"
 cbc = { version = "0.2.0-pre.2", features = ["alloc"] }
 # end of packages pending cipher/digest release
 iso7816-tlv = "0.4.4"
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"], optional = true }
 
 [features]
 # to make development easier, all features are on by default. this will change later.
@@ -32,7 +32,7 @@ proxmark = ["dep:serialport", "dep:serde", "serde/derive", "dep:bincode", "dep:b
 # PCSC support. Empty for now.
 pcsc = []
 # cli tool inclusion
-cli = []
+cli = ["dep:clap", "clap/derive"]
 # PACE support. Empty for now but we'll surely need some libs for it, right?
 pace = []
 

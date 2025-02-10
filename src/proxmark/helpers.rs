@@ -1,3 +1,6 @@
+use super::CommandError;
+use super::Status;
+
 #[allow(unused_parens)] // < I think the parentheses here are useful.
 pub(crate) fn merge_len_and_ng(len: u16, ng: bool) -> u16 {
     // Encode length and ng together (Length is 15 bits and ng is 1 bit.)
@@ -26,4 +29,22 @@ pub fn convert_mix_args_to_ng(data: &Vec<u8>, arg0: u64, arg1: u64, arg2: u64) -
         data.clone(),
     ]
     .concat();
+}
+
+pub fn check_response_status<'a>(response_status: i8) -> Result<(), CommandError> {
+    if response_status == Status::Success as i8 {
+        return Ok(());
+    }
+    return Err(CommandError {
+        error_code: response_status,
+        error_name: {
+            let status = Status::from_repr(response_status);
+            if status.is_some() {
+                let status_str: &'static str = status.unwrap().into();
+                Some(status_str.into())
+            } else {
+                None
+            }
+        },
+    });
 }
