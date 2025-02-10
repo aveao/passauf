@@ -59,6 +59,10 @@ struct CliArgs {
     /// Enable trace logging
     #[arg(long = "trace", conflicts_with = "debug", default_value_t = false)]
     trace: bool,
+
+    /// Dump files
+    #[arg(long, default_value_t = false)]
+    dump: bool,
 }
 
 fn main() {
@@ -180,32 +184,35 @@ fn main() {
 
     // TODO: Read and compare EF_SOD
 
-    // temporary: dump EF_DG2 image
-    let file_data = iso7816::secure_select_and_read_file(
-        &mut smartcard,
-        "EF.DG2",
-        true,
-        &mut ssc,
-        &ks_enc,
-        &ks_mac,
-    )
-    .unwrap();
-    let dg_info = icao9303::DATA_GROUPS.get("EF.DG2").unwrap();
-    let parse_result = (dg_info.parser)(file_data, &dg_info, true).unwrap();
+    // Temporary: Dump EF_DG2 image only
+    if args.dump {
+        let file_data = iso7816::secure_select_and_read_file(
+            &mut smartcard,
+            "EF.DG2",
+            true,
+            &mut ssc,
+            &ks_enc,
+            &ks_mac,
+        )
+        .unwrap();
 
-    let ef_dg2_file: types::EFDG2 = match parse_result {
-        types::ParsedDataGroup::EFDG2(ef_com_file) => ef_com_file,
-        _ => {
-            panic!("Expected EFDG2 but got {:x?}", parse_result);
-        }
-    };
+        let dg_info = icao9303::DATA_GROUPS.get("EF.DG2").unwrap();
+        let parse_result = (dg_info.parser)(file_data, &dg_info, true).unwrap();
 
-    let filename =
-        "/tmp/EF.DG2".to_owned() + &ef_dg2_file.biometrics[0].image_format.get_extension();
-    let mut f = std::fs::File::create(&filename).unwrap();
-    std::io::Write::write_all(&mut f, &ef_dg2_file.biometrics[0].data).unwrap();
-    f.sync_all().unwrap();
-    info!("Saved EF_DG2 image to {}.", &filename);
+        let ef_dg2_file: types::EFDG2 = match parse_result {
+            types::ParsedDataGroup::EFDG2(ef_com_file) => ef_com_file,
+            _ => {
+                panic!("Expected EFDG2 but got {:x?}", parse_result);
+            }
+        };
+
+        let filename =
+            "/tmp/EF.DG2".to_owned() + &ef_dg2_file.biometrics[0].image_format.get_extension();
+        let mut f = std::fs::File::create(&filename).unwrap();
+        std::io::Write::write_all(&mut f, &ef_dg2_file.biometrics[0].data).unwrap();
+        f.sync_all().unwrap();
+        info!("Saved EF_DG2 image to {}.", &filename);
+    }
 
     drop(smartcard);
 }
