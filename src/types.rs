@@ -308,11 +308,93 @@ pub enum ParsedDataGroup {
     EFDG12(EFDG12),
 }
 
+fn validate_mrz_field_check_digit(
+    field: &String,
+    check_digit: &char,
+    verbose: bool,
+    verbose_as: Option<String>,
+) -> bool {
+    let calculated_check_digit = icao9303::calculate_check_digit(&field);
+    let check_digit_valid = *check_digit == calculated_check_digit;
+    if !check_digit_valid && verbose && verbose_as.is_some() {
+        warn!(
+            "{} checksum is invalid (doc={}, calculated={}).",
+            verbose_as.unwrap(),
+            check_digit,
+            calculated_check_digit
+        );
+    }
+    return check_digit_valid;
+}
+
 #[derive(Debug)]
 pub enum MRZ {
     // TD1Mrz(TD1Mrz),
     // TD2Mrz(TD2Mrz),
     TD3Mrz(TD3Mrz),
+}
+
+pub trait MRZChecksum {
+    /// Internal function for use with traits, as one cannot define fields in a trait.
+    fn get_checksum_variables(
+        &self,
+    ) -> (
+        &String,
+        &char,
+        &String,
+        &char,
+        &String,
+        &char,
+        String,
+        &char,
+    );
+
+    /// Returns (document_number_valid, date_of_birth_valid, date_of_expiry_valid, composite_valid)
+    fn calculate_common_checksums(&self, verbose: bool) -> (bool, bool, bool, bool) {
+        // cd = check digit
+        let (
+            document_number,
+            document_number_cd,
+            date_of_birth,
+            date_of_birth_cd,
+            date_of_expiry,
+            date_of_expiry_cd,
+            composite_base,
+            composite_cd,
+        ) = self.get_checksum_variables();
+
+        let document_number_valid = validate_mrz_field_check_digit(
+            document_number,
+            document_number_cd,
+            verbose,
+            Some("Document number".to_string()),
+        );
+        let date_of_birth_valid = validate_mrz_field_check_digit(
+            date_of_birth,
+            date_of_birth_cd,
+            verbose,
+            Some("Date of birth".to_string()),
+        );
+        let date_of_expiry_valid = validate_mrz_field_check_digit(
+            date_of_expiry,
+            date_of_expiry_cd,
+            verbose,
+            Some("Date of expiry".to_string()),
+        );
+        let composite_valid = validate_mrz_field_check_digit(
+            &composite_base,
+            composite_cd,
+            verbose,
+            Some("Composite".to_string()),
+        );
+
+        return (
+            document_number_valid,
+            date_of_birth_valid,
+            date_of_expiry_valid,
+            composite_valid,
+        );
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -352,22 +434,41 @@ pub struct TD3Mrz {
     pub composite_check_digit: char,
 }
 
-fn validate_field_check_digit(
-    field: &String,
-    check_digit: &char,
-    verbose_as: Option<String>,
-) -> bool {
-    let calculated_check_digit = icao9303::calculate_check_digit(&field);
-    let check_digit_valid = *check_digit == calculated_check_digit;
-    if !check_digit_valid && verbose_as.is_some() {
-        warn!(
-            "{} checksum is invalid (doc={}, calculated={}).",
-            verbose_as.unwrap(),
-            check_digit,
-            calculated_check_digit
+impl MRZChecksum for TD3Mrz {
+    fn get_checksum_variables(
+        &self,
+    ) -> (
+        &String,
+        &char,
+        &String,
+        &char,
+        &String,
+        &char,
+        String,
+        &char,
+    ) {
+        // ICAO 9303 p4, edition 8, 4.2.2.2 says:
+        // "Composite check digit for characters of machine readable data of the lower line
+        // in positions 1 to 10, 14 to 20 and 22 to 43, including values for letters that are
+        // a part of the number fields and their check digits."
+        let composite_base = vec![
+            &self.raw_mrz[44..44 + 10],
+            &self.raw_mrz[44 + 13..44 + 20],
+            &self.raw_mrz[44 + 21..44 + 43],
+        ]
+        .concat();
+
+        return (
+            &self.document_number,
+            &self.document_number_check_digit,
+            &self.date_of_birth,
+            &self.date_of_birth_check_digit,
+            &self.date_of_expiry,
+            &self.date_of_expiry_check_digit,
+            composite_base,
+            &self.composite_check_digit,
         );
     }
-    return check_digit_valid;
 }
 
 impl TD3Mrz {
@@ -396,50 +497,26 @@ impl TD3Mrz {
         });
     }
 
+    /// Returns (document_number_valid, date_of_birth_valid, date_of_expiry_valid,
+    /// personal_number_or_optional_data_elements_valid, composite_valid)
+    ///
+    /// verbose argument makes invalid check digits to log as warn.
     pub fn validate_check_digits(&self, verbose: bool) -> Vec<bool> {
-        let document_number_valid = validate_field_check_digit(
-            &self.document_number,
-            &self.document_number_check_digit,
-            Some("Document number".to_string()),
-        );
-        let date_of_birth_valid = validate_field_check_digit(
-            &self.date_of_birth,
-            &self.date_of_birth_check_digit,
-            Some("Date of birth".to_string()),
-        );
-        let date_of_expiry_valid = validate_field_check_digit(
-            &self.date_of_expiry,
-            &self.date_of_expiry_check_digit,
-            Some("Date of expiry".to_string()),
-        );
-
         let mut personal_number_or_optional_data_elements_valid = true;
         // If it's empty, then the check digit can be empty.
         if self.personal_number_or_optional_data_elements.len() != 0 {
-            personal_number_or_optional_data_elements_valid = validate_field_check_digit(
+            personal_number_or_optional_data_elements_valid = validate_mrz_field_check_digit(
                 &self.personal_number_or_optional_data_elements,
                 &self.personal_number_or_optional_data_elements_check_digit,
+                verbose,
                 Some("Personal number or optional data elements".to_string()),
             );
         } else if verbose {
             warn!("Personal number or optional data elements is empty, ignoring check digit.");
         }
 
-        // ICAO 9303 p4, edition 8, 4.2.2.2 says:
-        // "Composite check digit for characters of machine readable data of the lower line
-        // in positions 1 to 10, 14 to 20 and 22 to 43, including values for letters that are
-        // a part of the number fields and their check digits."
-        let composite_base = vec![
-            &self.raw_mrz[44..44 + 10],
-            &self.raw_mrz[44 + 13..44 + 20],
-            &self.raw_mrz[44 + 21..44 + 43],
-        ]
-        .concat();
-        let composite_valid = validate_field_check_digit(
-            &composite_base,
-            &self.composite_check_digit,
-            Some("Composite".to_string()),
-        );
+        let (document_number_valid, date_of_birth_valid, date_of_expiry_valid, composite_valid) =
+            self.calculate_common_checksums(verbose);
 
         return vec![
             document_number_valid,
