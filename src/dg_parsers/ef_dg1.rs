@@ -31,9 +31,15 @@ impl types::EFDG1 {
     #[cfg(feature = "cli")]
     pub fn fancy_print(&self, data_group: &icao9303::DataGroup) {
         dg_helpers::print_section_intro("EF_DG1", data_group.description);
-        // Here I have TD3 hardcoded, but that's not intended to stay.
-        let result = types::TD3Mrz::deserialize(&self.raw_mrz).unwrap();
-        result.fancy_print();
+        match self.raw_mrz.len() {
+            88 => {
+                let result = types::TD3Mrz::deserialize(&self.raw_mrz).unwrap();
+                result.fancy_print();
+            }
+            _ => {
+                dg_helpers::print_string_element("Raw MRZ", &self.raw_mrz);
+            }
+        }
         info!("");
     }
 }
@@ -54,7 +60,6 @@ pub fn parser(
     debug!("tlvs: {:02x?}", tlvs);
 
     // Deserialize the file from the given TLV data.
-    // TODO: parse DG1 further
     let result = types::EFDG1 {
         raw_mrz: dg_helpers::tlv_get_string_value(&tlvs, &0x5F1F)
             .expect("MRZ field (0x5F1F) not in DG1"),

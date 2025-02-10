@@ -1,7 +1,7 @@
 use super::base_commands;
 use super::comms::send_and_get_command;
 use super::helpers::convert_mix_args_to_ng;
-use super::types::{Command, PM3PacketResponseNG, Status};
+use super::types::{CannotSelectError, Command, PM3PacketResponseNG, Status};
 use bitflags::bitflags;
 
 bitflags! {
@@ -51,7 +51,9 @@ pub fn select_14a(
 
     // 0: couldn't read, 1: OK, with ATS, 2: OK, no ATS, 3: proprietary Anticollision
     // TODO: no ATS is not currently implemented.
-    assert!(response.arg0 == 1);
+    if response.arg0 == 0 {
+        return Err(Box::new(CannotSelectError {}));
+    }
     return Ok(response.arg0 as u8);
 }
 

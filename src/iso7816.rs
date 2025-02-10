@@ -215,7 +215,7 @@ impl ApduCommand {
     /// Send APDU to the given smartcard and return RAPDU and status code
     pub fn exchange(
         &mut self,
-        smartcard: &mut impl Smartcard,
+        smartcard: &mut Box<impl Smartcard + ?Sized>,
         assert_on_status: bool,
     ) -> (Vec<u8>, u16) {
         let (rapdu, status_code) =
@@ -227,7 +227,7 @@ impl ApduCommand {
     /// (but using secure communications)
     pub fn secure_exchange(
         &mut self,
-        smartcard: &mut impl Smartcard,
+        smartcard: &mut Box<impl Smartcard + ?Sized>,
         assert_on_status: bool,
         secure_comms: bool,
         ssc: &mut u64,
@@ -288,12 +288,15 @@ impl ApduCommand {
     }
 }
 
-pub fn select_and_read_file(smartcard: &mut impl Smartcard, filename: &str) -> Option<Vec<u8>> {
+pub fn select_and_read_file(
+    smartcard: &mut Box<impl Smartcard + ?Sized>,
+    filename: &str,
+) -> Option<Vec<u8>> {
     return secure_select_and_read_file(smartcard, filename, false, &mut 0, &vec![], &vec![]);
 }
 
 pub fn secure_select_and_read_file(
-    smartcard: &mut impl Smartcard,
+    smartcard: &mut Box<impl Smartcard + ?Sized>,
     filename: &str,
     secure_comms: bool,
     ssc: &mut u64,

@@ -8,9 +8,7 @@ use retail_mac::{Mac, RetailMac};
 use sha1::{Digest, Sha1};
 use simplelog::{debug, info};
 
-use crate::smartcard_abstractions::Smartcard;
-use crate::types;
-use crate::{dg_parsers, helpers, iso7816};
+use crate::{dg_parsers, iso7816, smartcard_abstractions::Smartcard, types};
 
 type RetailMacDes = RetailMac<des::Des>;
 type TDesCbcEnc = cbc::Encryptor<des::TdesEde2>;
@@ -259,7 +257,7 @@ pub fn calculate_initial_ssc_bac(rnd_ic: &[u8], rnd_ifd: &[u8]) -> u64 {
 
 /// Authenticate with Basic Access Control
 pub fn do_bac_authentication(
-    port: &mut impl Smartcard,
+    port: &mut Box<impl Smartcard + ?Sized>,
     document_number: &String,
     date_of_birth: &String,
     date_of_expiry: &String,
@@ -313,7 +311,7 @@ pub fn do_bac_authentication(
 
 pub fn do_authentication(
     pace_available: bool,
-    smartcard: &mut impl Smartcard,
+    smartcard: &mut Box<impl Smartcard + ?Sized>,
     document_number: &String,
     date_of_birth: &String,
     date_of_expiry: &String,

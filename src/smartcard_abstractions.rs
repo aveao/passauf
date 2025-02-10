@@ -1,6 +1,23 @@
+#[cfg(feature = "proxmark")]
 use serialport::SerialPort;
+use simplelog::{info, warn};
 
 use crate::proxmark;
+
+pub fn connect_to_interface_by_name<'a>(
+    name: &str,
+    path: &'a Option<String>,
+) -> Option<Box<impl InterfaceDevice + use<'a>>> {
+    match name {
+        "proxmark" => {
+            let proxmark_interface = ProxmarkInterface::connect(path.as_ref()).unwrap();
+            return Some(Box::new(proxmark_interface));
+        }
+        _ => {
+            return None;
+        }
+    };
+}
 
 #[allow(drop_bounds, dead_code)]
 pub trait Smartcard: Drop {
@@ -11,7 +28,7 @@ pub trait Smartcard: Drop {
 #[allow(drop_bounds)]
 pub trait InterfaceDevice: Drop {
     fn connect(path: Option<&String>) -> Option<impl InterfaceDevice>;
-    fn select(&mut self) -> Option<impl Smartcard>;
+    fn select<'a>(&'a mut self) -> Option<Box<dyn Smartcard + 'a>>;
 }
 
 #[cfg(feature = "proxmark")]
@@ -20,8 +37,13 @@ pub struct Proxmark14ASmartcard<'a> {
 }
 
 #[cfg(feature = "proxmark")]
+pub struct Proxmark14BSmartcard<'a> {
+    interface: &'a mut ProxmarkInterface,
+}
+
+#[cfg(feature = "proxmark")]
 pub struct ProxmarkInterface {
-    pub serial_port: Box<dyn SerialPort>,
+    pub(crate) serial_port: Box<dyn SerialPort>,
 }
 
 #[cfg(feature = "proxmark")]
@@ -33,15 +55,47 @@ impl Drop for ProxmarkInterface {
 
 #[cfg(feature = "proxmark")]
 impl InterfaceDevice for ProxmarkInterface {
-    fn connect(path: Option<&String>) -> Option<impl InterfaceDevice> {
-        let port = proxmark::connect(path.unwrap()).ok()?;
+    fn connect(input_path: Option<&String>) -> Option<impl InterfaceDevice> {
+        // If no path was supplied, try to find it.
+        let path = match input_path {
+            Some(data) => data,
+            None => &proxmark::find_proxmark_serial_port()?,
+        };
+
+        info!("Connecting to proxmark on {}...", path);
+        let port = proxmark::connect(path).ok()?;
         return Some(ProxmarkInterface { serial_port: port });
     }
 
-    fn select(&mut self) -> Option<impl Smartcard> {
-        // TODO: handle result properly, also add 14b
-        proxmark::select_14a(&mut self.serial_port, false).ok()?;
-        return Some(Proxmark14ASmartcard { interface: self });
+    fn select<'a>(&'a mut self) -> Option<Box<dyn Smartcard + 'a>> {
+        // Select on 14A
+        match proxmark::select_14a(&mut self.serial_port, false) {
+            Ok(result) => {
+                match result {
+                    2 => {
+                        info!("Got no ATR (Answer To Reset) while selecting, we're not handling this currently, will continue but rest of code may fail.")
+                    }
+                    3 => {
+                        info!("Got a proprietary anticollision while selecting, will continue but rest of code may fail.")
+                    }
+                    _ => {}
+                }
+                return Some(Box::new(Proxmark14ASmartcard { interface: self }));
+            }
+            Err(_) => {
+                warn!("Selecting on ISO/IEC 14443 Modulation A failed, trying B.")
+            }
+        }
+        // Select on 14B
+        match proxmark::select_14b(&mut self.serial_port, false) {
+            Ok(_) => {
+                return Some(Box::new(Proxmark14BSmartcard { interface: self }));
+            }
+            Err(_) => {
+                warn!("Selecting on ISO/IEC 14443 Modulation B failed.")
+            }
+        }
+        return None;
     }
 }
 
@@ -64,6 +118,31 @@ impl Smartcard for Proxmark14ASmartcard<'_> {
     fn exchange_apdu(&mut self, data: &Vec<u8>) -> Option<Vec<u8>> {
         let response =
             proxmark::exchange_apdu_14a(&mut self.interface.serial_port, data, false).ok()?;
+        // TODO: check proxmark error state here
+        return Some(response.data);
+    }
+}
+
+#[cfg(feature = "proxmark")]
+impl Drop for Proxmark14BSmartcard<'_> {
+    fn drop(&mut self) {
+        let _ = proxmark::switch_off_field_14b(&mut self.interface.serial_port);
+        let _ = proxmark::hf_drop_field(&mut self.interface.serial_port);
+    }
+}
+
+#[cfg(feature = "proxmark")]
+impl Smartcard for Proxmark14BSmartcard<'_> {
+    fn exchange_command(&mut self, data: &Vec<u8>) -> Option<Vec<u8>> {
+        let response =
+            proxmark::exchange_command_14b(&mut self.interface.serial_port, data, 0, 0).ok()?;
+        // TODO: check proxmark error state here
+        return Some(response.data);
+    }
+
+    fn exchange_apdu(&mut self, data: &Vec<u8>) -> Option<Vec<u8>> {
+        let response =
+            proxmark::exchange_apdu_14b(&mut self.interface.serial_port, data, false).ok()?;
         // TODO: check proxmark error state here
         return Some(response.data);
     }

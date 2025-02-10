@@ -7,15 +7,72 @@ mod proxmark;
 mod smartcard_abstractions;
 mod types;
 
+use clap::{CommandFactory, Parser};
 use simplelog::{info, warn, CombinedLogger, TermLogger};
-use smartcard_abstractions::{InterfaceDevice, ProxmarkInterface};
-use std::{env, fs::File, io::Write};
+use smartcard_abstractions::{connect_to_interface_by_name, InterfaceDevice, ProxmarkInterface};
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct CliArgs {
+    /// Path of the reader to use.
+    #[arg(short, long)]
+    path: Option<String>,
+
+    /// Reader backend to use.
+    #[arg(short, long, value_name = "proxmark/pcsc", ignore_case = true, default_value_t = ("proxmark".to_string()))]
+    reader: String,
+
+    /// Date of birth, YYMMDD (Requires DoE and Doc Number, mutually exclusive with CAN)
+    #[arg(
+        short = 'b',
+        long = "dob",
+        value_name = "YYMMDD",
+        required_unless_present = "card_access_number"
+    )]
+    date_of_birth: Option<String>,
+
+    /// Date of document expiry, YYMMDD (Requires DoB and Doc Number, mutually exclusive with CAN)
+    #[arg(
+        short = 'e',
+        long = "doe",
+        value_name = "YYMMDD",
+        required_unless_present = "card_access_number"
+    )]
+    date_of_expiry: Option<String>,
+
+    /// Document number (Requires DoB and DoE, mutually exclusive with CAN)
+    #[arg(
+        short = 'n',
+        long = "num",
+        required_unless_present = "card_access_number"
+    )]
+    document_number: Option<String>,
+
+    /// Card Access Number (PACE-only, mutually exclusive with DoB, DoE and Doc Number)
+    #[arg(short = 'c', long = "can", required_unless_present_any=["date_of_birth", "date_of_expiry", "document_number"])]
+    card_access_number: Option<String>,
+
+    /// Enable debug logging
+    #[arg(long = "debug", conflicts_with = "trace", default_value_t = false)]
+    debug: bool,
+
+    /// Enable trace logging
+    #[arg(long = "trace", conflicts_with = "debug", default_value_t = false)]
+    trace: bool,
+}
 
 fn main() {
-    let log_level = simplelog::LevelFilter::Info;
+    let args = CliArgs::parse();
 
-    let args: Vec<String> = env::args().collect();
-    let mut interface = ProxmarkInterface::connect(Some(&args[1])).unwrap();
+    // TODO: this can be improved
+    let log_level = if args.debug {
+        simplelog::LevelFilter::Debug
+    } else if args.trace {
+        simplelog::LevelFilter::Trace
+    } else {
+        simplelog::LevelFilter::Info
+    };
+
     CombinedLogger::init(vec![TermLogger::new(
         log_level,
         simplelog::Config::default(),
@@ -24,8 +81,14 @@ fn main() {
     )])
     .unwrap();
 
+    // Connect to given reader
+    let mut interface = connect_to_interface_by_name(&args.reader, &args.path)
+        .expect("Couldn't find given interface.");
+
     // Select a nearby eMRTD
-    let mut smartcard = interface.select().unwrap();
+    let mut smartcard = interface
+        .select()
+        .expect("Couldn't select an eMRTD in range.");
     let mut pace_available = false;
 
     let file_data = iso7816::select_and_read_file(&mut smartcard, "EF.CardAccess");
@@ -59,8 +122,16 @@ fn main() {
     assert!(status_code == iso7816::StatusCode::Ok as u16);
 
     // Authenticate
-    let (ks_enc, ks_mac, mut ssc) =
-        icao9303::do_authentication(pace_available, &mut smartcard, &args[2], &args[3], &args[4]);
+    if args.card_access_number.is_some() {
+        panic!("PACE/CAN isn't implemented, cannot proceed with authentication.");
+    }
+    let (ks_enc, ks_mac, mut ssc) = icao9303::do_authentication(
+        pace_available,
+        &mut smartcard,
+        &args.document_number.unwrap(),
+        &args.date_of_birth.unwrap(),
+        &args.date_of_expiry.unwrap(),
+    );
 
     let file_data = iso7816::secure_select_and_read_file(
         &mut smartcard,
@@ -107,8 +178,9 @@ fn main() {
         }
     }
 
-    // Read and compare EF_SOD
-    // temp
+    // TODO: Read and compare EF_SOD
+
+    // temporary: dump EF_DG2 image
     let file_data = iso7816::secure_select_and_read_file(
         &mut smartcard,
         "EF.DG2",
@@ -128,7 +200,8 @@ fn main() {
         }
     };
 
-    let filename = "EF.DG2".to_owned() + &ef_dg2_file.biometrics[0].image_format.get_extension();
+    let filename =
+        "/tmp/EF.DG2".to_owned() + &ef_dg2_file.biometrics[0].image_format.get_extension();
     let mut f = std::fs::File::create(&filename).unwrap();
     std::io::Write::write_all(&mut f, &ef_dg2_file.biometrics[0].data).unwrap();
     f.sync_all().unwrap();

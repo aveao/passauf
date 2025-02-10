@@ -5,7 +5,7 @@ use super::types::{
 };
 use bincode;
 use core::mem;
-use serialport;
+use serialport::{self, SerialPortType};
 use simplelog::{debug, trace, warn};
 use std::str;
 use std::time::Duration;
@@ -17,6 +17,24 @@ const COMMANDNG_PREAMBLE_MAGIC: u32 = 0x61334d50; // PM3a
 const RESPONSENG_PREAMBLE_MAGIC: u32 = 0x62334d50; // PM3b
 const COMMANDNG_POSTAMBLE_MAGIC: u16 = 0x3361; // a3
 const RESPONSENG_POSTAMBLE_MAGIC: u16 = 0x3362; // b3
+
+/// Finds a proxmark connected via USB.
+pub fn find_proxmark_serial_port() -> Option<String> {
+    let ports = serialport::available_ports().ok()?;
+    for p in ports {
+        // p.port_name
+        match p.port_type {
+            SerialPortType::UsbPort(usb_port_info) => {
+                if usb_port_info.vid == 0x9ac4 && usb_port_info.pid == 0x4b8f {
+                    return Some(p.port_name);
+                }
+            }
+            // unknown may be valuable?
+            _ => {}
+        }
+    }
+    return None;
+}
 
 pub fn open_serial_comms(
     path: &str,

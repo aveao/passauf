@@ -38,7 +38,6 @@ pub fn check_capabilities(
 pub fn quit_session(
     port: &mut Box<dyn serialport::SerialPort>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    send_command(port, Command::HfDropfield, &vec![], true)?;
     send_command(port, Command::QuitSession, &vec![], true)?;
     return Ok(());
 }

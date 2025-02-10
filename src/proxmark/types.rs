@@ -1,5 +1,17 @@
 use serde::{Deserialize, Serialize};
+use std::{error::Error, fmt};
 use strum::{FromRepr, IntoStaticStr};
+
+#[derive(Debug)]
+pub struct CannotSelectError;
+
+impl Error for CannotSelectError {}
+
+impl fmt::Display for CannotSelectError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Could not select a card in field.")
+    }
+}
 
 // more at: https://github.com/RfidResearchGroup/proxmark3/blob/e4430037336b86f0aa7a08d23b67efcab662c829/include/pm3_cmd.h#L877
 #[repr(i8)]
@@ -74,20 +86,4 @@ pub struct PM3PacketResponseNG {
     pub arg1: u64,
     pub arg2: u64,
     pub data: Vec<u8>,
-}
-
-impl PM3PacketResponseNG {
-    pub fn empty() -> PM3PacketResponseNG {
-        return PM3PacketResponseNG {
-            arg0: 0,
-            arg1: 0,
-            arg2: 0,
-            cmd: 0,
-            data: vec![],
-            length: 0,
-            ng: false,
-            reason: 0,
-            status: Status::EUndef as i8,
-        };
-    }
 }

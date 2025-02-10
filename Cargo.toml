@@ -22,6 +22,7 @@ des = "0.9.0-pre.2"
 cbc = { version = "0.2.0-pre.2", features = ["alloc"] }
 # end of packages pending cipher/digest release
 iso7816-tlv = "0.4.4"
+clap = { version = "4.5", features = ["derive"] }
 
 [features]
 # to make development easier, all features are on by default. this will change later.

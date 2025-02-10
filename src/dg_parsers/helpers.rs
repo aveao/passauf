@@ -330,7 +330,7 @@ pub(crate) fn print_string_element(title: &str, value: &String) {
 
 #[cfg(feature = "cli")]
 pub(crate) fn print_option_string_element(title: &str, value: &Option<String>) {
-    if *value == None {
+    if value.is_none() {
         return;
     }
     info!(
@@ -342,7 +342,7 @@ pub(crate) fn print_option_string_element(title: &str, value: &Option<String>) {
 
 #[cfg(feature = "cli")]
 pub(crate) fn print_option_string_element_as_name(title: &str, value: &Option<String>) {
-    if *value == None {
+    if value.is_none() {
         return;
     }
     let text = value.clone().unwrap();
@@ -375,7 +375,7 @@ pub(crate) fn print_string_element_as_mrz_date(title: &str, value: &String) {
 
 #[cfg(feature = "cli")]
 pub(crate) fn print_option_string_element_as_dg_date(title: &str, value: &Option<String>) {
-    if *value == None {
+    if value.is_none() {
         return;
     }
     let text = value.clone().unwrap();
@@ -387,11 +387,11 @@ pub(crate) fn print_option_string_element_as_dg_date(title: &str, value: &Option
 #[cfg(feature = "cli")]
 pub(crate) fn print_option_binary_element<T>(title: &str, value: &Option<T>)
 where
-    T: IntoIterator + PartialEq + Clone + std::fmt::Debug,
+    T: IntoIterator + Clone + std::fmt::Debug,
     T::IntoIter: ExactSizeIterator,
 {
     // "baby's first generic"
-    if *value == None {
+    if value.is_none() {
         return;
     }
     // needing to clone sucks here, can we do better?
@@ -412,10 +412,10 @@ where
 #[cfg(feature = "cli")]
 pub(crate) fn print_option_debug_element<T>(title: &str, value: &Option<T>)
 where
-    T: std::fmt::Debug + Clone + PartialEq,
+    T: std::fmt::Debug + Clone,
 {
     // "baby's second generic"
-    if *value == None {
+    if value.is_none() {
         return;
     }
     info!(
