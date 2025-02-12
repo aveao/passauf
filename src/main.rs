@@ -74,6 +74,11 @@ fn main() {
     )])
     .unwrap();
 
+    let filename_distinguisher = match args.document_number.as_ref() {
+        Some(document_number) => document_number,
+        None => &helpers::unix_time().to_string(),
+    };
+
     // Connect to given reader
     let mut interface = args
         .backend
@@ -89,7 +94,7 @@ fn main() {
     let (_, _, parsed_data) = helpers::read_file_by_name(
         &mut smartcard,
         DataGroupEnum::EFCardAccess,
-        &args.document_number.as_ref().unwrap(),
+        &filename_distinguisher,
         &args.dump_path,
     );
     let pace_available = parsed_data.is_some();
@@ -108,7 +113,7 @@ fn main() {
         helpers::read_file(
             &mut smartcard,
             dg_info,
-            &args.document_number.as_ref().unwrap(),
+            &filename_distinguisher,
             &args.dump_path,
         );
     }
@@ -134,7 +139,7 @@ fn main() {
     let (_, _, parse_result) = helpers::secure_read_file_by_name(
         &mut smartcard,
         DataGroupEnum::EFCom,
-        &args.document_number.as_ref().unwrap(),
+        &filename_distinguisher,
         &args.dump_path,
         true,
         &mut ssc,
@@ -163,7 +168,7 @@ fn main() {
         helpers::secure_read_file(
             &mut smartcard,
             dg_info,
-            &args.document_number.as_ref().unwrap(),
+            &filename_distinguisher,
             &args.dump_path,
             true,
             &mut ssc,

@@ -3,6 +3,7 @@ use simplelog::warn;
 use std::cmp::max;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::icao9303;
 use crate::iso7816;
@@ -100,7 +101,7 @@ pub fn get_tlv_by_tag(tlvs: &Vec<ber::Tlv>, desired_tag_number: u16) -> Option<&
 pub fn read_file_by_name<'a>(
     smartcard: &'a mut Box<impl Smartcard + ?Sized>,
     file: icao9303::DataGroupEnum,
-    document_number: &String,
+    filename_distinguisher: &String,
     base_dump_path: &Option<PathBuf>,
 ) -> (
     &'a icao9303::DataGroup,
@@ -108,7 +109,8 @@ pub fn read_file_by_name<'a>(
     Option<ParsedDataGroup>,
 ) {
     let dg_info = &icao9303::DATA_GROUPS[file as usize];
-    let (file_read, parsed_data) = read_file(smartcard, &dg_info, document_number, base_dump_path);
+    let (file_read, parsed_data) =
+        read_file(smartcard, &dg_info, filename_distinguisher, base_dump_path);
     return (dg_info, file_read, parsed_data);
 }
 
@@ -118,13 +120,13 @@ pub fn read_file_by_name<'a>(
 pub fn read_file(
     smartcard: &mut Box<impl Smartcard + ?Sized>,
     dg_info: &icao9303::DataGroup,
-    document_number: &String,
+    filename_distinguisher: &String,
     base_dump_path: &Option<PathBuf>,
 ) -> (Option<Vec<u8>>, Option<ParsedDataGroup>) {
     return secure_read_file(
         smartcard,
         &dg_info,
-        document_number,
+        filename_distinguisher,
         base_dump_path,
         false,
         &mut 0,
@@ -139,7 +141,7 @@ pub fn read_file(
 pub fn secure_read_file_by_name<'a>(
     smartcard: &'a mut Box<impl Smartcard + ?Sized>,
     file: icao9303::DataGroupEnum,
-    document_number: &String,
+    filename_distinguisher: &String,
     base_dump_path: &Option<PathBuf>,
     secure_comms: bool,
     ssc: &mut u64,
@@ -154,7 +156,7 @@ pub fn secure_read_file_by_name<'a>(
     let (file_read, parsed_data) = secure_read_file(
         smartcard,
         &dg_info,
-        document_number,
+        filename_distinguisher,
         base_dump_path,
         secure_comms,
         ssc,
@@ -170,7 +172,7 @@ pub fn secure_read_file_by_name<'a>(
 pub fn secure_read_file(
     smartcard: &mut Box<impl Smartcard + ?Sized>,
     dg_info: &icao9303::DataGroup,
-    document_number: &String,
+    filename_distinguisher: &String,
     base_dump_path: &Option<PathBuf>,
     secure_comms: bool,
     ssc: &mut u64,
@@ -183,7 +185,7 @@ pub fn secure_read_file(
     match file_read {
         Some(ref file_data) => {
             parsed_data = (dg_info.parser)(&file_data, &dg_info, true);
-            let filename = format!("{}-{}", document_number, dg_info.name).replace(".", "_");
+            let filename = format!("{}-{}", filename_distinguisher, dg_info.name).replace(".", "_");
 
             if base_dump_path.is_some() {
                 let _ = (dg_info.dumper)(
@@ -197,4 +199,15 @@ pub fn secure_read_file(
         None => {}
     }
     return (file_read, parsed_data);
+}
+
+/// Get the current unix time.
+///
+/// Assumes we're after 1970 and before 292271023045 :^)
+pub(crate) fn unix_time() -> u64 {
+    // the .unwrap() here assumes we're not in <1970
+    return SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
 }
