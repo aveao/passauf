@@ -13,7 +13,10 @@ pub fn parser(
     if print_data {
         dg_helpers::print_section_intro(data_group);
         info!("(No parser available for {})", data_group.name);
-        dg_helpers::print_option_binary_element(&format!("Raw data ({}b)", data.len()), &Some(data));
+        dg_helpers::print_option_binary_element(
+            &format!("Raw data ({}b)", data.len()),
+            &Some(data),
+        );
     }
     return None;
 }

@@ -86,7 +86,7 @@ pub fn parser(
     print_data: bool,
 ) -> Option<types::ParsedDataGroup> {
     // Parse the base TLV
-    let base_tlv = ber::Tlv::parse(data).0.unwrap();
+    let base_tlv = ber::Tlv::parse(data).0.ok()?;
     assert!(helpers::get_tlv_tag(&base_tlv) == 0x61);
     debug!("base_tlv: {:02x?}", &base_tlv);
 

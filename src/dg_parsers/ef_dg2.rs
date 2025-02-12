@@ -67,7 +67,10 @@ pub fn dumper(
         io::Write::write_all(&mut f, &biometric.data)?;
         f.sync_all()?;
 
-        info!("<magenta>Saved image to {}</>", &file_path.to_string_lossy());
+        info!(
+            "<magenta>Saved image to {}</>",
+            &file_path.to_string_lossy()
+        );
     }
     return Ok(());
 }
