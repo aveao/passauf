@@ -2,6 +2,12 @@ use iso7816_tlv::ber;
 use simplelog::warn;
 use std::cmp::max;
 use std::collections::HashMap;
+use std::path::Path;
+
+use crate::icao9303;
+use crate::iso7816;
+use crate::smartcard_abstractions::Smartcard;
+use crate::types::ParsedDataGroup;
 
 pub fn asn1_parse_len(data: Vec<u8>) -> (u8, u32) {
     let result: (u8, u32) = match data[0] {
@@ -86,4 +92,111 @@ pub fn get_tlv_by_tag(tlvs: &Vec<ber::Tlv>, desired_tag_number: u16) -> Option<&
         }
     }
     return None;
+}
+
+/// Selects, reads, parses and dumps file
+///
+/// Returns (dg_info, file_read, parsed_data)
+pub fn read_file_by_name<'a>(
+    smartcard: &'a mut Box<impl Smartcard + ?Sized>,
+    file: icao9303::DataGroupEnum,
+    dump: bool,
+    document_number: &String,
+    base_dump_path: &Path,
+) -> (
+    &'a icao9303::DataGroup,
+    Option<Vec<u8>>,
+    Option<ParsedDataGroup>,
+) {
+    let dg_info = &icao9303::DATA_GROUPS[file as usize];
+    let (file_read, parsed_data) =
+        read_file(smartcard, &dg_info, dump, document_number, base_dump_path);
+    return (dg_info, file_read, parsed_data);
+}
+
+/// Selects, reads, parses and dumps file
+///
+/// Returns (file_read, parsed_data)
+pub fn read_file(
+    smartcard: &mut Box<impl Smartcard + ?Sized>,
+    dg_info: &icao9303::DataGroup,
+    dump: bool,
+    document_number: &String,
+    base_dump_path: &Path,
+) -> (Option<Vec<u8>>, Option<ParsedDataGroup>) {
+    return secure_read_file(
+        smartcard,
+        &dg_info,
+        dump,
+        document_number,
+        base_dump_path,
+        false,
+        &mut 0,
+        &vec![],
+        &vec![],
+    );
+}
+
+/// Selects, reads, parses and dumps file with secure comms
+///
+/// Returns (dg_info, file_read, parsed_data)
+pub fn secure_read_file_by_name<'a>(
+    smartcard: &'a mut Box<impl Smartcard + ?Sized>,
+    file: icao9303::DataGroupEnum,
+    dump: bool,
+    document_number: &String,
+    base_dump_path: &Path,
+    secure_comms: bool,
+    ssc: &mut u64,
+    ks_enc: &Vec<u8>,
+    ks_mac: &Vec<u8>,
+) -> (
+    &'a icao9303::DataGroup,
+    Option<Vec<u8>>,
+    Option<ParsedDataGroup>,
+) {
+    let dg_info = &icao9303::DATA_GROUPS[file as usize];
+    let (file_read, parsed_data) = secure_read_file(
+        smartcard,
+        &dg_info,
+        dump,
+        document_number,
+        base_dump_path,
+        secure_comms,
+        ssc,
+        ks_enc,
+        ks_mac,
+    );
+    return (dg_info, file_read, parsed_data);
+}
+
+/// Selects, reads, parses and dumps file with secure comms
+///
+/// Returns (file_read, parsed_data)
+pub fn secure_read_file(
+    smartcard: &mut Box<impl Smartcard + ?Sized>,
+    dg_info: &icao9303::DataGroup,
+    dump: bool,
+    document_number: &String,
+    base_dump_path: &Path,
+    secure_comms: bool,
+    ssc: &mut u64,
+    ks_enc: &Vec<u8>,
+    ks_mac: &Vec<u8>,
+) -> (Option<Vec<u8>>, Option<ParsedDataGroup>) {
+    let file_read =
+        iso7816::select_and_read_file(smartcard, dg_info, secure_comms, ssc, ks_enc, ks_mac);
+    let mut parsed_data: Option<ParsedDataGroup> = None;
+    match file_read {
+        Some(ref file_data) => {
+            parsed_data = (dg_info.parser)(&file_data, &dg_info, true);
+            let filename = format!("{}-{}", document_number, dg_info.name).replace(".", "_");
+
+            if dump {
+                let _ = (dg_info.dumper)(&file_data, &parsed_data, base_dump_path, &filename);
+            }
+        }
+        None => {}
+    }
+    return (file_read, parsed_data);
 }

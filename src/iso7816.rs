@@ -291,40 +291,7 @@ impl ApduCommand {
     }
 }
 
-pub fn select_and_read_file_by_name(
-    smartcard: &mut Box<impl Smartcard + ?Sized>,
-    file: icao9303::DataGroupEnum,
-) -> (&icao9303::DataGroup, Option<Vec<u8>>) {
-    let dg_info = &icao9303::DATA_GROUPS[file as usize];
-    return (
-        dg_info,
-        secure_select_and_read_file(smartcard, dg_info, false, &mut 0, &vec![], &vec![]),
-    );
-}
-
-pub fn secure_select_and_read_file_by_name<'a>(
-    smartcard: &mut Box<impl Smartcard + ?Sized>,
-    file: icao9303::DataGroupEnum,
-    secure_comms: bool,
-    ssc: &mut u64,
-    ks_enc: &Vec<u8>,
-    ks_mac: &Vec<u8>,
-) -> (&'a icao9303::DataGroup, Option<Vec<u8>>) {
-    let dg_info = &icao9303::DATA_GROUPS[file as usize];
-    return (
-        dg_info,
-        secure_select_and_read_file(smartcard, dg_info, secure_comms, ssc, ks_enc, ks_mac),
-    );
-}
-
 pub fn select_and_read_file(
-    smartcard: &mut Box<impl Smartcard + ?Sized>,
-    file: &icao9303::DataGroup,
-) -> Option<Vec<u8>> {
-    return secure_select_and_read_file(smartcard, file, false, &mut 0, &vec![], &vec![]);
-}
-
-pub fn secure_select_and_read_file(
     smartcard: &mut Box<impl Smartcard + ?Sized>,
     dg_info: &icao9303::DataGroup,
     secure_comms: bool,

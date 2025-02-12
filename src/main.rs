@@ -10,6 +10,7 @@ mod types;
 use std::path::Path;
 
 use clap::Parser;
+use icao9303::DataGroupEnum;
 use simplelog::{info, warn, CombinedLogger, TermLogger};
 use smartcard_abstractions::{connect_to_interface_by_name, InterfaceDevice};
 
@@ -97,19 +98,18 @@ fn main() {
     let mut smartcard = interface
         .select()
         .expect("Couldn't select an eMRTD in range.");
-    let mut pace_available = false;
 
     // Read EF.CardAccess
-    let (dg_info, ef_cardaccess) = iso7816::select_and_read_file_by_name(
+    let (_, _, parsed_data) = helpers::read_file_by_name(
         &mut smartcard,
-        icao9303::DataGroupEnum::EFCardAccess,
+        DataGroupEnum::EFCardAccess,
+        args.dump,
+        &args.document_number.as_ref().unwrap(),
+        base_dump_path,
     );
-    match ef_cardaccess {
-        Some(file_data) => {
-            pace_available = true;
-            (dg_info.parser)(&file_data, dg_info, true);
-        }
-        None => warn!("PACE isn't available on this eMRTD. Will try BAC."),
+    let pace_available = parsed_data.is_some();
+    if !pace_available {
+        warn!("PACE isn't available on this eMRTD. Will authenticate with BAC.");
     }
 
     // Read all files under the master file
@@ -120,11 +120,16 @@ fn main() {
         {
             continue;
         }
-        if let Some(file_data) = iso7816::select_and_read_file(&mut smartcard, dg_info) {
-            (dg_info.parser)(&file_data, &dg_info, true);
-        }
+        helpers::read_file(
+            &mut smartcard,
+            dg_info,
+            args.dump,
+            &args.document_number.as_ref().unwrap(),
+            base_dump_path,
+        );
     }
 
+    // Select eMRTD applet
     info!("Selecting eMRTD LDS1 applet");
     let _ = iso7816::apdu_select_file_by_name(icao9303::AID_MRTD_LDS1.to_vec())
         .exchange(&mut smartcard, true);
@@ -141,19 +146,23 @@ fn main() {
         &args.date_of_expiry.unwrap(),
     );
 
-    let (dg_info, file_read) = iso7816::secure_select_and_read_file_by_name(
+    // Read EF.COM, which contains a file list
+    let (_, _, parse_result) = helpers::secure_read_file_by_name(
         &mut smartcard,
-        icao9303::DataGroupEnum::EFCom,
+        DataGroupEnum::EFCom,
+        args.dump,
+        &args.document_number.as_ref().unwrap(),
+        base_dump_path,
         true,
         &mut ssc,
         &ks_enc,
         &ks_mac,
     );
-    let parse_result = (dg_info.parser)(&file_read.unwrap(), &dg_info, true).unwrap();
-    let ef_com_file: types::EFCom = match parse_result {
+    let parsed_ef_com = parse_result.unwrap();
+    let ef_com_file: types::EFCom = match parsed_ef_com {
         types::ParsedDataGroup::EFCom(ef_com_file) => ef_com_file,
         _ => {
-            panic!("Expected EFCom but got {:x?}", parse_result);
+            panic!("Expected EFCom but got {:x?}", parsed_ef_com);
         }
     };
 
@@ -167,35 +176,18 @@ fn main() {
         {
             continue;
         }
-        let file_read = iso7816::secure_select_and_read_file(
+
+        helpers::secure_read_file(
             &mut smartcard,
             dg_info,
+            args.dump,
+            &args.document_number.as_ref().unwrap(),
+            base_dump_path,
             true,
             &mut ssc,
             &ks_enc,
             &ks_mac,
         );
-        match file_read {
-            Some(file_data) => {
-                let parsed_data = (dg_info.parser)(&file_data, &dg_info, true);
-                let filename = format!(
-                    "{}-{}",
-                    &args.document_number.as_ref().unwrap(),
-                    dg_info.name
-                )
-                .replace(".", "_");
-
-                if args.dump {
-                    let _ = (dg_info.dumper)(&file_data, &parsed_data, &base_dump_path, &filename);
-                }
-            }
-            None => {
-                warn!(
-                    "{} exists according to EF.COM, but we cannot read it.",
-                    dg_info.name
-                );
-            }
-        }
     }
 
     // TODO: Read and compare EF_SOD
