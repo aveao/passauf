@@ -10,13 +10,21 @@ use std::{fs, io, path::Path};
 
 pub fn parser(
     data: &Vec<u8>,
-    _data_group: &icao9303::DataGroup,
+    data_group: &icao9303::DataGroup,
     _print_data: bool,
 ) -> Option<types::ParsedDataGroup> {
     // Parse the base TLV
     let base_tlv = ber::Tlv::parse(data).0.ok()?;
-    assert!(helpers::get_tlv_tag(&base_tlv) == 0x75);
     debug!("base_tlv: {:02x?}", &base_tlv);
+
+    let base_tlv_tag = helpers::get_tlv_tag(&base_tlv);
+    if base_tlv_tag != data_group.tag.into() {
+        warn!(
+            "Found {}'s TLV tag as 0x{} (expected 0x{}), skipping parsing.",
+            data_group.name, base_tlv_tag, data_group.tag
+        );
+        return None;
+    };
 
     let base_tlv_value = helpers::get_tlv_constructed_value(&base_tlv);
     let biometric_info_template_group_template_tlv =

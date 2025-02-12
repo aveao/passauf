@@ -3,6 +3,7 @@ use crate::helpers;
 use crate::icao9303;
 use crate::types;
 use iso7816_tlv::ber;
+use simplelog::warn;
 use simplelog::{debug, info};
 
 impl types::EFCom {
@@ -38,9 +39,17 @@ pub fn parser(
     print_data: bool,
 ) -> Option<types::ParsedDataGroup> {
     // Parse the base TLV
-    let base_tlv = ber::Tlv::parse(data).0.unwrap();
-    assert!(helpers::get_tlv_tag(&base_tlv) == 0x60);
+    let base_tlv = ber::Tlv::parse(data).0.ok()?;
     debug!("base_tlv: {:02x?}", &base_tlv);
+
+    let base_tlv_tag = helpers::get_tlv_tag(&base_tlv);
+    if base_tlv_tag != data_group.tag.into() {
+        warn!(
+            "Found {}'s TLV tag as 0x{} (expected 0x{}), skipping parsing.",
+            data_group.name, base_tlv_tag, data_group.tag
+        );
+        return None;
+    };
 
     // Get the TLVs stored inside the base tag and sort them by tag number
     let base_tlv_value = helpers::get_tlv_constructed_value(&base_tlv);
@@ -52,19 +61,25 @@ pub fn parser(
         lds_version: match tlvs.get(&0x5F01) {
             Some(data) => {
                 let value_bytes = helpers::get_tlv_value_bytes(data);
-                assert!(value_bytes.len() == 4);
-                Some(value_bytes.try_into().unwrap())
+                if value_bytes.len() != 4 {
+                    None
+                } else {
+                    Some(value_bytes.try_into().unwrap())
+                }
             }
             None => None,
         },
         unicode_version: match tlvs.get(&0x5F36) {
             Some(data) => {
                 let mut value_bytes = helpers::get_tlv_value_bytes(data);
-                assert!(value_bytes.len() == 6);
-                // Add dots to the unicode version string.
-                value_bytes.insert(4, b'.');
-                value_bytes.insert(2, b'.');
-                Some(String::from_utf8(value_bytes).unwrap())
+                if value_bytes.len() != 6 {
+                    None
+                } else {
+                    // Add dots to the unicode version string.
+                    value_bytes.insert(4, b'.');
+                    value_bytes.insert(2, b'.');
+                    Some(String::from_utf8(value_bytes).unwrap())
+                }
             }
             None => None,
         },

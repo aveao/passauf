@@ -3,6 +3,7 @@ use crate::helpers;
 use crate::icao9303;
 use crate::types;
 use iso7816_tlv::ber;
+use simplelog::warn;
 use simplelog::{debug, info};
 
 impl types::TD1Mrz {
@@ -87,8 +88,16 @@ pub fn parser(
 ) -> Option<types::ParsedDataGroup> {
     // Parse the base TLV
     let base_tlv = ber::Tlv::parse(data).0.ok()?;
-    assert!(helpers::get_tlv_tag(&base_tlv) == 0x61);
     debug!("base_tlv: {:02x?}", &base_tlv);
+
+    let base_tlv_tag = helpers::get_tlv_tag(&base_tlv);
+    if base_tlv_tag != data_group.tag.into() {
+        warn!(
+            "Found {}'s TLV tag as 0x{} (expected 0x{}), skipping parsing.",
+            data_group.name, base_tlv_tag, data_group.tag
+        );
+        return None;
+    };
 
     // Get the TLVs stored inside the base tag and sort them by tag number
     let base_tlv_value = helpers::get_tlv_constructed_value(&base_tlv);
