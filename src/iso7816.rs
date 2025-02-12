@@ -212,7 +212,9 @@ impl ApduCommand {
         return apdu;
     }
 
-    /// Send APDU to the given smartcard and return RAPDU and status code
+    /// Send APDU to the given smartcard
+    ///
+    /// Returns (RAPDU, status code)
     pub fn exchange(
         &mut self,
         smartcard: &mut Box<impl Smartcard + ?Sized>,
@@ -223,8 +225,9 @@ impl ApduCommand {
         return (rapdu, status_code);
     }
 
-    /// Send APDU to the given smartcard and return RAPDU and status code
-    /// (but using secure communications)
+    /// Send APDU to the given smartcard using secure communications
+    ///
+    /// Returns (RAPDU, status code)
     pub fn secure_exchange(
         &mut self,
         smartcard: &mut Box<impl Smartcard + ?Sized>,
@@ -288,34 +291,58 @@ impl ApduCommand {
     }
 }
 
+pub fn select_and_read_file_by_name(
+    smartcard: &mut Box<impl Smartcard + ?Sized>,
+    file: icao9303::DataGroupEnum,
+) -> (&icao9303::DataGroup, Option<Vec<u8>>) {
+    let dg_info = &icao9303::DATA_GROUPS[file as usize];
+    return (
+        dg_info,
+        secure_select_and_read_file(smartcard, dg_info, false, &mut 0, &vec![], &vec![]),
+    );
+}
+
+pub fn secure_select_and_read_file_by_name<'a>(
+    smartcard: &mut Box<impl Smartcard + ?Sized>,
+    file: icao9303::DataGroupEnum,
+    secure_comms: bool,
+    ssc: &mut u64,
+    ks_enc: &Vec<u8>,
+    ks_mac: &Vec<u8>,
+) -> (&'a icao9303::DataGroup, Option<Vec<u8>>) {
+    let dg_info = &icao9303::DATA_GROUPS[file as usize];
+    return (
+        dg_info,
+        secure_select_and_read_file(smartcard, dg_info, secure_comms, ssc, ks_enc, ks_mac),
+    );
+}
+
 pub fn select_and_read_file(
     smartcard: &mut Box<impl Smartcard + ?Sized>,
-    filename: &str,
+    file: &icao9303::DataGroup,
 ) -> Option<Vec<u8>> {
-    return secure_select_and_read_file(smartcard, filename, false, &mut 0, &vec![], &vec![]);
+    return secure_select_and_read_file(smartcard, file, false, &mut 0, &vec![], &vec![]);
 }
 
 pub fn secure_select_and_read_file(
     smartcard: &mut Box<impl Smartcard + ?Sized>,
-    filename: &str,
+    dg_info: &icao9303::DataGroup,
     secure_comms: bool,
     ssc: &mut u64,
     ks_enc: &Vec<u8>,
     ks_mac: &Vec<u8>,
 ) -> Option<Vec<u8>> {
-    let dg_info = icao9303::DATA_GROUPS.get(filename).unwrap();
-
-    info!("<d>Selecting {} ({})</>", filename, dg_info.description);
+    info!("<d>Selecting {} ({})</>", dg_info.name, dg_info.description);
     let mut apdu = apdu_select_file_by_ef(dg_info.file_id);
     let (_, status_code) =
         apdu.secure_exchange(smartcard, false, secure_comms, ssc, ks_enc, ks_mac);
 
     if status_code != StatusCode::Ok as u16 {
-        warn!("{} not found (this is probably fine).", filename);
+        warn!("{} not found (this is probably fine).", dg_info.name);
         return None;
     }
 
-    info!("<d>Reading {} ({})</>", filename, dg_info.description);
+    info!("<d>Reading {} ({})</>", dg_info.name, dg_info.description);
     let mut total_data: Vec<u8> = vec![];
     let mut bytes_to_read = 0x05;
     let mut file_len: u16 = 0;
@@ -339,7 +366,7 @@ pub fn secure_select_and_read_file(
             if file_len > 5_000 {
                 info!(
                     "<d>{} seems quite large ({}b), this may take a bit.</>",
-                    filename, file_len
+                    dg_info.name, file_len
                 );
             }
         }

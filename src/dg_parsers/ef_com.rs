@@ -8,7 +8,7 @@ use simplelog::{debug, info};
 impl types::EFCom {
     #[cfg(feature = "cli")]
     pub fn fancy_print(&self, data_group: &icao9303::DataGroup) {
-        dg_helpers::print_section_intro("EF_COM", data_group.description);
+        dg_helpers::print_section_intro(data_group);
         dg_helpers::print_option_binary_element("LDS Version", &self.lds_version);
         dg_helpers::print_option_string_element("Unicode Version", &self.unicode_version);
         info!("");
@@ -18,12 +18,11 @@ impl types::EFCom {
             pad_len = 56
         );
 
-        // TODO: sorting would be nice, somehow.
-        for (_, (dg_name, dg_info)) in icao9303::DATA_GROUPS.entries.iter().enumerate() {
+        for dg_info in icao9303::DATA_GROUPS.iter() {
             if self.data_group_tag_list.contains(&dg_info.tag) {
                 info!(
                     "{:>pad_len$} <yellow>{}</>",
-                    dg_name,
+                    dg_info.name,
                     dg_info.description,
                     pad_len = 15
                 );
@@ -34,12 +33,12 @@ impl types::EFCom {
 }
 
 pub fn parser(
-    data: Vec<u8>,
+    data: &Vec<u8>,
     data_group: &icao9303::DataGroup,
     print_data: bool,
 ) -> Option<types::ParsedDataGroup> {
     // Parse the base TLV
-    let base_tlv = ber::Tlv::parse(&data).0.unwrap();
+    let base_tlv = ber::Tlv::parse(data).0.unwrap();
     assert!(helpers::get_tlv_tag(&base_tlv) == 0x60);
     debug!("base_tlv: {:02x?}", &base_tlv);
 

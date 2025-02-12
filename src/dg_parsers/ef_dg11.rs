@@ -8,7 +8,7 @@ use simplelog::{debug, info};
 impl types::EFDG11 {
     #[cfg(feature = "cli")]
     pub fn fancy_print(&self, data_group: &icao9303::DataGroup) {
-        dg_helpers::print_section_intro("EF_DG11", data_group.description);
+        dg_helpers::print_section_intro(data_group);
         dg_helpers::print_option_string_element_as_name("Full name of holder", &self.full_name);
         dg_helpers::print_option_debug_element("Other names", &self.other_names);
         dg_helpers::print_option_string_element("Personal number", &self.personal_number);
@@ -33,12 +33,12 @@ impl types::EFDG11 {
 }
 
 pub fn parser(
-    data: Vec<u8>,
+    data: &Vec<u8>,
     data_group: &icao9303::DataGroup,
     print_data: bool,
 ) -> Option<types::ParsedDataGroup> {
     // Parse the base TLV
-    let base_tlv = ber::Tlv::parse(&data).0.unwrap();
+    let base_tlv = ber::Tlv::parse(data).0.unwrap();
     assert!(helpers::get_tlv_tag(&base_tlv) == 0x6B);
     debug!("base_tlv: {:02x?}", &base_tlv);
 

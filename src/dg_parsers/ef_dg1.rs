@@ -74,19 +74,19 @@ impl types::TD3Mrz {
 impl types::EFDG1 {
     #[cfg(feature = "cli")]
     pub fn fancy_print(&self, data_group: &icao9303::DataGroup) {
-        dg_helpers::print_section_intro("EF_DG1", data_group.description);
+        dg_helpers::print_section_intro(data_group);
         self.mrz.fancy_print();
         info!("");
     }
 }
 
 pub fn parser(
-    data: Vec<u8>,
+    data: &Vec<u8>,
     data_group: &icao9303::DataGroup,
     print_data: bool,
 ) -> Option<types::ParsedDataGroup> {
     // Parse the base TLV
-    let base_tlv = ber::Tlv::parse(&data).0.unwrap();
+    let base_tlv = ber::Tlv::parse(data).0.unwrap();
     assert!(helpers::get_tlv_tag(&base_tlv) == 0x61);
     debug!("base_tlv: {:02x?}", &base_tlv);
 

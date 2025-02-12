@@ -7,6 +7,8 @@ mod proxmark;
 mod smartcard_abstractions;
 mod types;
 
+use std::path::Path;
+
 use clap::Parser;
 use simplelog::{info, warn, CombinedLogger, TermLogger};
 use smartcard_abstractions::{connect_to_interface_by_name, InterfaceDevice};
@@ -19,7 +21,7 @@ struct CliArgs {
     path: Option<String>,
 
     /// Reader backend to use.
-    #[arg(short, long, value_name = "proxmark/pcsc", ignore_case = true, default_value_t = ("proxmark".to_string()))]
+    #[arg(short, long, value_name = "proxmark/pcsc", ignore_case = true, default_value_t = String::from("proxmark"))]
     reader: String,
 
     /// Date of birth, YYMMDD (Requires DoE and Doc Number, mutually exclusive with CAN)
@@ -77,6 +79,8 @@ fn main() {
         simplelog::LevelFilter::Info
     };
 
+    let base_dump_path = Path::new("/tmp/");
+
     CombinedLogger::init(vec![TermLogger::new(
         log_level,
         simplelog::Config::default(),
@@ -95,35 +99,35 @@ fn main() {
         .expect("Couldn't select an eMRTD in range.");
     let mut pace_available = false;
 
-    let file_data = iso7816::select_and_read_file(&mut smartcard, "EF.CardAccess");
-    let dg_info = icao9303::DATA_GROUPS.get("EF.CardAccess").unwrap();
-    match file_data {
+    // Read EF.CardAccess
+    let (dg_info, ef_cardaccess) = iso7816::select_and_read_file_by_name(
+        &mut smartcard,
+        icao9303::DataGroupEnum::EFCardAccess,
+    );
+    match ef_cardaccess {
         Some(file_data) => {
             pace_available = true;
-            (dg_info.parser)(file_data, &dg_info, true);
+            (dg_info.parser)(&file_data, dg_info, true);
         }
         None => warn!("PACE isn't available on this eMRTD. Will try BAC."),
     }
 
-    // read all files under the master file
-    for (_, (dg_name, dg_info)) in icao9303::DATA_GROUPS.entries.iter().enumerate() {
-        if dg_name == &"EF.CardAccess" || dg_info.in_lds1 || (dg_info.pace_only && !pace_available)
+    // Read all files under the master file
+    for dg_info in icao9303::DATA_GROUPS.iter() {
+        if dg_info.name == "EF.CardAccess"
+            || dg_info.in_lds1
+            || (dg_info.pace_only && !pace_available)
         {
             continue;
         }
-        let file_data = iso7816::select_and_read_file(&mut smartcard, dg_name);
-        match file_data {
-            Some(file_data) => {
-                (dg_info.parser)(file_data, &dg_info, true);
-            }
-            None => {}
+        if let Some(file_data) = iso7816::select_and_read_file(&mut smartcard, dg_info) {
+            (dg_info.parser)(&file_data, &dg_info, true);
         }
     }
 
     info!("Selecting eMRTD LDS1 applet");
-    let (_, status_code) = iso7816::apdu_select_file_by_name(icao9303::AID_MRTD_LDS1.to_vec())
+    let _ = iso7816::apdu_select_file_by_name(icao9303::AID_MRTD_LDS1.to_vec())
         .exchange(&mut smartcard, true);
-    assert!(status_code == iso7816::StatusCode::Ok as u16);
 
     // Authenticate
     if args.card_access_number.is_some() {
@@ -132,22 +136,20 @@ fn main() {
     let (ks_enc, ks_mac, mut ssc) = icao9303::do_authentication(
         pace_available,
         &mut smartcard,
-        &args.document_number.unwrap(),
+        &args.document_number.as_ref().unwrap(),
         &args.date_of_birth.unwrap(),
         &args.date_of_expiry.unwrap(),
     );
 
-    let file_data = iso7816::secure_select_and_read_file(
+    let (dg_info, file_read) = iso7816::secure_select_and_read_file_by_name(
         &mut smartcard,
-        "EF.COM",
+        icao9303::DataGroupEnum::EFCom,
         true,
         &mut ssc,
         &ks_enc,
         &ks_mac,
-    )
-    .unwrap();
-    let dg_info = icao9303::DATA_GROUPS.get("EF.COM").unwrap();
-    let parse_result = (dg_info.parser)(file_data, &dg_info, true).unwrap();
+    );
+    let parse_result = (dg_info.parser)(&file_read.unwrap(), &dg_info, true).unwrap();
     let ef_com_file: types::EFCom = match parse_result {
         types::ParsedDataGroup::EFCom(ef_com_file) => ef_com_file,
         _ => {
@@ -156,63 +158,46 @@ fn main() {
     };
 
     // read all files under the LDS1 file
-    for (_, (dg_name, dg_info)) in icao9303::DATA_GROUPS.entries.iter().enumerate() {
-        // is_binary is temporary here
-        if dg_name == &"EF.COM"
+    for dg_info in icao9303::DATA_GROUPS.iter() {
+        if dg_info.name == "EF.COM"
             || !dg_info.in_lds1
             || dg_info.pace_only
-            || dg_info.is_binary
+            || (dg_info.is_binary && !args.dump)
             || !ef_com_file.data_group_tag_list.contains(&dg_info.tag)
         {
             continue;
         }
-        let file_data = iso7816::secure_select_and_read_file(
+        let file_read = iso7816::secure_select_and_read_file(
             &mut smartcard,
-            dg_name,
+            dg_info,
             true,
             &mut ssc,
             &ks_enc,
             &ks_mac,
         );
-        match file_data {
+        match file_read {
             Some(file_data) => {
-                (dg_info.parser)(file_data, &dg_info, true);
+                let parsed_data = (dg_info.parser)(&file_data, &dg_info, true);
+                let filename = format!(
+                    "{}-{}",
+                    &args.document_number.as_ref().unwrap(),
+                    dg_info.name
+                ).replace(".", "_");
+
+                if args.dump {
+                    let _ = (dg_info.dumper)(&file_data, &parsed_data, &base_dump_path, &filename);
+                }
             }
-            None => {}
+            None => {
+                warn!(
+                    "{} exists according to EF.COM, but we cannot read it.",
+                    dg_info.name
+                );
+            }
         }
     }
 
     // TODO: Read and compare EF_SOD
-
-    // Temporary: Dump EF_DG2 image only
-    if args.dump {
-        let file_data = iso7816::secure_select_and_read_file(
-            &mut smartcard,
-            "EF.DG2",
-            true,
-            &mut ssc,
-            &ks_enc,
-            &ks_mac,
-        )
-        .unwrap();
-
-        let dg_info = icao9303::DATA_GROUPS.get("EF.DG2").unwrap();
-        let parse_result = (dg_info.parser)(file_data, &dg_info, true).unwrap();
-
-        let ef_dg2_file: types::EFDG2 = match parse_result {
-            types::ParsedDataGroup::EFDG2(ef_com_file) => ef_com_file,
-            _ => {
-                panic!("Expected EFDG2 but got {:x?}", parse_result);
-            }
-        };
-
-        let filename =
-            "/tmp/EF.DG2".to_owned() + &ef_dg2_file.biometrics[0].image_format.get_extension();
-        let mut f = std::fs::File::create(&filename).unwrap();
-        std::io::Write::write_all(&mut f, &ef_dg2_file.biometrics[0].data).unwrap();
-        f.sync_all().unwrap();
-        info!("Saved EF_DG2 image to {}.", &filename);
-    }
 
     drop(smartcard);
 }

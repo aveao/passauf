@@ -2,7 +2,7 @@ use iso7816_tlv::ber;
 use simplelog::{debug, info, warn};
 use std::{cmp::max, collections::HashMap};
 
-use crate::{helpers, types};
+use crate::{helpers, icao9303, types};
 
 const SECTION_TITLE_PAD_TO_LEN: usize = 56;
 const PRINT_TITLE_PAD_TO_LEN: usize = 25;
@@ -231,10 +231,10 @@ pub fn format_date(dd: u8, mm: u8, yyyy: u16) -> String {
     );
 }
 
-pub(crate) fn print_section_intro(filename: &str, subtitle: &str) {
+pub(crate) fn print_section_intro(datagroup: &icao9303::DataGroup) {
     info!("");
-    info!("{}", pad_section_title(filename));
-    info!("{}", pad_section_subtitle(subtitle));
+    info!("{}", pad_section_title(datagroup.name));
+    info!("{}", pad_section_subtitle(datagroup.description));
     info!("");
 }
 
