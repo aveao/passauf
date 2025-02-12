@@ -1,30 +1,68 @@
 # passauf
 
-Passauf is a Rust tool that lets you read eMRTDs¹ using a standard contactless reader (\<todo) or using a Proxmark 3. It supports BAC¹ and PACE¹.
+Passauf is a Rust tool that lets you read eMRTDs¹ using a standard contactless reader (\<todo) or using a Proxmark 3. It supports BAC¹, and I plan to support PACE¹ soon.
 
-In late 2020, I wrote an eMRTD implementation for the [Iceman firmware of Proxmark 3](https://github.com/RfidResearchGroup/proxmark3), supporting only BAC. I have been meaning to support PACE since then, but as PACE requires implementing a lot of hash functions, I didn't really feel like doing it in C anymore². This is me fulfilling that dream, and hopefully making something that looks nicer in the process.
+![](https://elixi.re/i/7vim01so3o.png)
 
-¹: See Terminology section.
-²: The codebase was starting to look ugly, the memory management was annoying as always. I also was vary of pulling in an ASN.1 library, which only made writing code for it more complicated.
+In late 2020, I wrote an eMRTD implementation for the [Iceman firmware of Proxmark 3](https://github.com/RfidResearchGroup/proxmark3), supporting only BAC. I have been meaning to support PACE since then, but as PACE requires implementing a lot of additional crypto, I didn't really feel like doing it in C anymore². This is me fulfilling that dream, and hopefully making something that looks nicer in the process.
 
-## Rough overview
+¹: See Terminology section in infodump.md.
+²: The codebase was starting to look ugly, the memory management was annoying as always. I also was vary of pulling in libraries for handling BER-TLV or ASN.1, which only made writing code for it more complicated.
+
+## Basic Usage
+
+No binaries are provided at this time, so you're on your own for compiling the project.
+
+Generally, `--help` exists for using the tool.
+
+You can read a document and have its information printed in your terminal like so:
+```bash
+passauf -n documentnumber -b birthdate -e expiry
+```
+
+Dates must be entered in the YYMMDD format.
+
+Example for a document with number of "A123B234", expiry of "12 Feb 2035" and birthdate of "01 Feb 2003/1903":
+```bash
+passauf -n A123B234 -b 030201 -e 350212
+```
+
+- By default, no files are dumped. To dump a document, you can add `--dump`. If you want the files to be put to a specific location, you can use `--dump path` syntax (like `--dump /tmp`), by default it'll use the current work directory.
+    - When `--dump` is present, all files on the document that can be read are read, parsed, displayed and dumped.
+    - When `--dump` isn't present, only the non-binary files are read, parsed and displayed.
+- By default, we assume that you're using a proxmark (as PCSC isn't supported yet). To pick a different reader backend, you can use `--backend`, like `--backend pcsc` or `--backend proxmark`.
+- By default we'll try to find a reader based on available USB devices. To pick a specific reader, you can use `--reader PATH`, like `--reader /dev/ttyACM0`.
+
+Here's a relatively complete example showing all main flags in use:
+```bash
+passauf -n A123B234 -b 030201 -e 350212 --dump /tmp --backend proxmark --reader /dev/ttyACM0
+```
+
+At this time, PACE isn't implemented, so you cannot use `--can`.
+
+## High-level overview of what this project does
 
 Accessing an eMRTD works like so:
 
 - On the physical layer and as the transmission protocol, we talk using ISO/IEC 14443 (Type A or B) with eMRTDs. This merely gets bytes flowing back and forth. This part is generally obscured from us, as it's handled by the contactless card reader, however, it does mean that you cannot use a reader intended for [ISO/IEC 15693 (Vicinity Cards)](https://en.wikipedia.org/wiki/ISO/IEC_15693) or LF¹.
     - For this we use the `pcsc` crate for regular smartcard readers, and regular serial communication for proxmark3 (thru the `serialport` crate).
 - For application protocol, we use ISO/IEC 7816-4¹. This lets us use standardized commands (APDUs¹).
-- We read the `EF_CardAccess` file if it is available, which contains the parameters for PACE.
+- We read the `EF.CardAccess` file if it is available, which contains the parameters for PACE and other types of authentication (Terminal Authentication, etc).
     - We parse this file using ASN.1.
 - If it's not available, we attempt BAC, else we attempt PACE.
     - This requires us to know either all of document's expiry, date of birth and document number, or in case of PACE, alternatively the CAN¹.
     - For BAC, this is a "three-pass challenge-response protocol according to [ISO/IEC 11770-2] Key Establishment Mechanism 6 using 3DES [FIPS 46-3] as block cipher."
     - PACE is designed to be more secure, uses asymmetric crypto and lets documents support a number of algorithms. This makes it take more work to support it.
     - According to ICAO 9303 p11, a document can be BAC-only, BAC and PACE, and PACE-only. I have one of each to test with.
-- Assuming authentication succeeds, we establish secure communication and read the rest of the files we can access, parse them and verify their checksums.
+- Assuming authentication succeeds, we establish secure communication and read the rest of the files we can access.
     - After the authentication stage, all communications are encrypted.
-    - Depending on user's requests, we may display them or dump them to a file.
-- Later: Certificate verification for the document.
+    - We parse a large number of documents, which come in variety of shapes but are generally stored in BER-TLV structures.
+        - As an extreme example of "variety of shapes": Reading the picture requires additionally implementing two other standards, ISO/IEC 19794-5 and ISO/IEC 39794, as they're used as the biometric container.
+        - These parsed files are then displayed for the user to peruse.
+    - We also dump the read files to a file if the user requests it.
+        - Here, some files (like those containing biometrics) have custom dumpers, as having a raw jpeg you pull out of your passport has some cool factor to it.
+- At the end, we validate the hashes of each file by comparing them against the hashes stored in `EF.SOD`.
+- At a later point, I'll implement certificate verification for the document.
 
 Helpful links from my last implementation:
 - [I have a list of known quirks in eMRTD data](https://wf.lavatech.top/aves-tech-notes/emrtd-data-quirks), which implementations have to account for.
@@ -32,7 +70,7 @@ Helpful links from my last implementation:
 
 So far I only plan to support LDS1, but if I find any eMRTDs supporting LDS2 I may look into it.
 
-¹: See Terminology section.
+¹: See Terminology section in infodump.md.
 
 ## Proxmark3 support
 
@@ -73,32 +111,6 @@ Here's the list of features I plan to support (checkmarks indicate if it is impl
     - [x] Status code parsing past OK
     - [x] Graceful error handling
 
-## Terminology
-
-You'll see me use terminology quite often. Here's some that may help:
-
-- MRTD/eMRTD/eMROTD: "(Electronic) Machine Readable (Official) Travel Documents".
-    - By default, "MRTD" refers to things like passports with MRZ fields.
-    - "Electronic" means that it has a chip following the standards.
-    - And at some point ICAO started adding "Official" in there for reasons unknown to me.
-- ICAO: "International Civil Aviation Organization", the UN Agency governing individual civil aviation. Of course, we use MRTDs for non-aviation purposes on any civil international travel³ too.
-- VIZ: Visual Inspection Zone: The visible parts of the identity page(s) on an MRTD.
-- MRZ: Machine Readable Zone: The part at the bottom of passports or back on IDs that are MRTDs with a lot of `<`s and [OCR-B](https://en.wikipedia.org/wiki/OCR-B) beauty.
-- BAC: Basic Access Control: This is an access control mechanism for eMRTDs with a single predefined hash method (TODO) and a simple two-way handshake.
-- PACE: TODO: It is optional to support PACE, but there are some documents that are PACE only, like German IDs and residence permit cards.
-- [ICAO 9303](https://www.icao.int/publications/pages/publication.aspx?docnum=9303): The main set of standards governing eMRTDs. There's more regional ones that diverge slightly. Example: ICAO 9303 mandates a gender field, German IDs exclude it for everyone, lacking the VIZ field and using < in MRZ to indicate gender of X. [See BSI TR-03110](https://www.bsi.bund.de/EN/Themen/Unternehmen-und-Organisationen/Standards-und-Zertifizierung/Technische-Richtlinien/TR-nach-Thema-sortiert/tr03110/tr-03110.html) for more info.
-- [ISO/IEC 14443](https://en.wikipedia.org/wiki/ISO/IEC_14443): Basic communication layer for 13.56MHz proximity cards. There's Type A and B, which changes modulation. Most passports are Type A, but some are Type B.
-- LF: Low frequency. For RFID purposes, this is 125kHz. Some people (incorrectly) call this "RFID" only.
-- HF: High Frequency. For RFID purposes, this is 13.56MHz. Some people (incorrectly) call this "NFC" only.
-    - NFC: Near Field Communications. This represents only a subset of HF, meaning different application protocols and tag types. This project will refrain from using this term as it is not relevant for us, and colloquial usage would only cause confusion. See this [helpful picture](https://upload.wikimedia.org/wikipedia/commons/3/33/NFC_Protocol_Stack.png), while we're also using ISO/IEC 14443 and ISO/IEC 7816-4, eMRTDs are not [NFC Type 4 Tags](https://docs.nordicsemi.com/bundle/ncs-latest/page/nrfxlib/nfc/doc/type_4_tag.html).
-- [ISO/IEC 7816-4](https://en.wikipedia.org/wiki/ISO/IEC_7816#7816-4:_Organization,_security_and_commands_for_interchange): This is the standard that is used for talking to smartcards, generally. It provides some standard commands, allowing us to get files and authenticate.
-    - [APDU](https://en.wikipedia.org/wiki/Smart_card_application_protocol_data_unit): Application protocol data unit. A concept of ISO/IEC 7816-4, a fixed data format.
-- RF: Radio frequency. Not specifically referring to frequencies themselves, colloquially used as "radio communications".
-- [PCSCd](https://linux.die.net/man/8/pcscd): A linux daemon for talking to smartcard interfaces.
-
-
-³: Some other means of travel do not require it, and sometimes you can use a non-MRTD to travel too. I was having fun enumerating knowledge, so I put down a list in the [infodump.md](/infodump.md) if you're curious.
-
 ## The Name
 
 Germans tend to shorten Passport¹ to Pass ("Haben Sie Ihren Pass dabei?" - "Do you have your passport with you?").
@@ -109,5 +121,6 @@ Pass auf translates to "watch out". There's no real implication there, it's just
 
 ## Stylistic Choices
 
-- I like explicit returns.
-- There's some asserts in the code, which I will replace them with more rust-y alternatives later.
+- I like explicit returns and use them a lot.
+- This project requires `std`.
+- There are some panics around that I intend to get rid of before late.

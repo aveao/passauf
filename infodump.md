@@ -2,6 +2,31 @@
 
 This file exists so if I get too rambly about a (hopefully) interesting topic, I can split it off from README.
 
+## Terminology
+
+You'll see me use terminology quite often. Here's some that may help:
+
+- MRTD/eMRTD/eMROTD: "(Electronic) Machine Readable (Official) Travel Documents".
+    - By default, "MRTD" refers to things like passports with MRZ fields.
+    - "Electronic" means that it has a chip following the standards.
+    - And at some point ICAO started adding "Official" in there for reasons unknown to me.
+- ICAO: "International Civil Aviation Organization", the UN Agency governing individual civil aviation. Of course, we use MRTDs for non-aviation purposes on any civil international travel¹ too.
+- VIZ: Visual Inspection Zone: The visible parts of the identity page(s) on an MRTD.
+- MRZ: Machine Readable Zone: The part at the bottom of passports or back on IDs that are MRTDs with a lot of `<`s and [OCR-B](https://en.wikipedia.org/wiki/OCR-B) beauty.
+- BAC: Basic Access Control: This is an access control mechanism for eMRTDs with a single predefined hash method (TODO) and a simple two-way handshake.
+- PACE: TODO: It is optional to support PACE, but there are some documents that are PACE only, like German IDs and residence permit cards.
+- [ICAO 9303](https://www.icao.int/publications/pages/publication.aspx?docnum=9303): The main set of standards governing eMRTDs. There's more regional ones that diverge slightly. Example: ICAO 9303 mandates a gender field, German IDs exclude it for everyone, lacking the VIZ field and using < in MRZ to indicate gender of X. [See BSI TR-03110](https://www.bsi.bund.de/EN/Themen/Unternehmen-und-Organisationen/Standards-und-Zertifizierung/Technische-Richtlinien/TR-nach-Thema-sortiert/tr03110/tr-03110.html) for more info.
+- [ISO/IEC 14443](https://en.wikipedia.org/wiki/ISO/IEC_14443): Basic communication layer for 13.56MHz proximity cards. There's Type A and B, which changes modulation. Most passports are Type A, but some are Type B.
+- LF: Low frequency. For RFID purposes, this is 125kHz. Some people (incorrectly) call this "RFID" only.
+- HF: High Frequency. For RFID purposes, this is 13.56MHz. Some people (incorrectly) call this "NFC" only.
+    - NFC: Near Field Communications. This represents only a subset of HF, meaning different application protocols and tag types. This project will refrain from using this term as it is not relevant for us, and colloquial usage would only cause confusion. See this [helpful picture](https://upload.wikimedia.org/wikipedia/commons/3/33/NFC_Protocol_Stack.png), while we're also using ISO/IEC 14443 and ISO/IEC 7816-4, eMRTDs are not [NFC Type 4 Tags](https://docs.nordicsemi.com/bundle/ncs-latest/page/nrfxlib/nfc/doc/type_4_tag.html).
+- [ISO/IEC 7816-4](https://en.wikipedia.org/wiki/ISO/IEC_7816#7816-4:_Organization,_security_and_commands_for_interchange): This is the standard that is used for talking to smartcards, generally. It provides some standard commands, allowing us to get files and authenticate.
+    - [APDU](https://en.wikipedia.org/wiki/Smart_card_application_protocol_data_unit): Application protocol data unit. A concept of ISO/IEC 7816-4, a fixed data format.
+- RF: Radio frequency. Not specifically referring to frequencies themselves, colloquially used as "radio communications".
+- [PCSCd](https://linux.die.net/man/8/pcscd): A linux daemon for talking to smartcard interfaces.
+
+¹: Some other means of travel do not require it, and sometimes you can use a non-MRTD to travel too. There's a list in this file as I was feeling like enumerating knowledge.
+
 ## International travel without an eMRTD
 
 I'm titling this as "travel without an eMRTD", and not "travle without a passport, because various countries let others' nationals enter with an ID alone. See the "International civil travel without passports" infodump section.

@@ -91,13 +91,14 @@ fn main() {
         .expect("Couldn't select an eMRTD in range.");
 
     // Read EF.CardAccess
-    let (_, _, parsed_data) = helpers::read_file_by_name(
+    let (_, file_read, _) = helpers::read_file_by_name(
         &mut smartcard,
         DataGroupEnum::EFCardAccess,
         &filename_distinguisher,
         &args.dump_path,
     );
-    let pace_available = parsed_data.is_some();
+    // TODO: Use parsed_data.is_some() here when we finally can parse EF.CardAccess
+    let pace_available = file_read.is_some();
     if !pace_available {
         warn!("PACE isn't available on this eMRTD. Will authenticate with BAC.");
     }
