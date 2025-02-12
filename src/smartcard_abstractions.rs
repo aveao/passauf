@@ -1,22 +1,52 @@
 #[cfg(feature = "proxmark")]
 use serialport::SerialPort;
 use simplelog::{info, warn};
+use std::{fmt, str::FromStr};
+use strum::IntoStaticStr;
 
-use crate::proxmark;
+use crate::{proxmark, types};
 
-pub fn connect_to_interface_by_name<'a>(
-    name: &str,
-    path: &'a Option<String>,
-) -> Option<Box<impl InterfaceDevice + use<'a>>> {
-    match name {
-        "proxmark" => {
-            let proxmark_interface = ProxmarkInterface::connect(path.as_ref()).unwrap();
-            return Some(Box::new(proxmark_interface));
+#[derive(Debug, Clone, IntoStaticStr)]
+pub enum ReaderInterface {
+    Proxmark,
+    PCSC,
+}
+
+impl fmt::Display for ReaderInterface {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ReaderInterface::Proxmark => write!(f, "proxmark"),
+            ReaderInterface::PCSC => write!(f, "pcsc"),
         }
-        _ => {
-            return None;
+    }
+}
+
+impl FromStr for ReaderInterface {
+    type Err = types::ParseError;
+    fn from_str(name: &str) -> Result<ReaderInterface, Self::Err> {
+        match name {
+            "proxmark" => Ok(ReaderInterface::Proxmark),
+            "pcsc" => Ok(ReaderInterface::PCSC),
+            _ => Err(types::ParseError {}),
         }
-    };
+    }
+}
+
+impl ReaderInterface {
+    pub fn connect<'a>(
+        &self,
+        path: &'a Option<String>,
+    ) -> Option<Box<impl InterfaceDevice + use<'a>>> {
+        match self {
+            ReaderInterface::Proxmark => {
+                let proxmark_interface = ProxmarkInterface::connect(path.as_ref()).unwrap();
+                return Some(Box::new(proxmark_interface));
+            }
+            _ => {
+                return None;
+            }
+        };
+    }
 }
 
 #[allow(drop_bounds, dead_code)]
@@ -68,6 +98,9 @@ impl InterfaceDevice for ProxmarkInterface {
     }
 
     fn select<'a>(&'a mut self) -> Option<Box<dyn Smartcard + 'a>> {
+        // First drop the field, useful in case we're stuck on something.
+        let _ = proxmark::hf_drop_field(&mut self.serial_port);
+
         // Select on 14A
         match proxmark::select_14a(&mut self.serial_port, false) {
             Ok(result) => {

@@ -7,23 +7,26 @@ mod proxmark;
 mod smartcard_abstractions;
 mod types;
 
-use std::path::Path;
-
 use clap::Parser;
 use icao9303::DataGroupEnum;
 use simplelog::{info, warn, CombinedLogger, TermLogger};
-use smartcard_abstractions::{connect_to_interface_by_name, InterfaceDevice};
+use smartcard_abstractions::{InterfaceDevice, ReaderInterface};
+use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct CliArgs {
-    /// Path of the reader to use.
-    #[arg(short, long)]
-    path: Option<String>,
+    /// Dump files? (path can be optionally supplied, defaults to current directory)
+    #[arg(long = "dump", value_name = "PATH", default_missing_value = ".", value_parser = clap::value_parser!(PathBuf), num_args = 0..=1)]
+    dump_path: Option<PathBuf>,
 
-    /// Reader backend to use.
-    #[arg(short, long, value_name = "proxmark/pcsc", ignore_case = true, default_value_t = String::from("proxmark"))]
-    reader: String,
+    /// Path of the reader to use.
+    #[arg(short = 'p', long, value_name = "PATH")]
+    reader: Option<String>,
+
+    /// Reader backend interface to use.
+    #[arg(short = 'i', long, value_name = "proxmark/pcsc", ignore_case = true, default_value_t = ReaderInterface::Proxmark)]
+    backend: ReaderInterface,
 
     /// Date of birth, YYMMDD (Requires DoE and Doc Number, mutually exclusive with CAN)
     #[arg(
@@ -55,35 +58,16 @@ struct CliArgs {
     #[arg(short = 'c', long = "can", required_unless_present_any=["date_of_birth", "date_of_expiry", "document_number"])]
     card_access_number: Option<String>,
 
-    /// Enable debug logging
-    #[arg(long = "debug", conflicts_with = "trace", default_value_t = false)]
-    debug: bool,
-
-    /// Enable trace logging
-    #[arg(long = "trace", conflicts_with = "debug", default_value_t = false)]
-    trace: bool,
-
-    /// Dump files
-    #[arg(long, default_value_t = false)]
-    dump: bool,
+    /// Log level (trace/debug/info/warn/error)
+    #[arg(long = "level", ignore_case = true, default_value_t = simplelog::LevelFilter::Info)]
+    log_level: simplelog::LevelFilter,
 }
 
 fn main() {
     let args = CliArgs::parse();
 
-    // TODO: this can be improved
-    let log_level = if args.debug {
-        simplelog::LevelFilter::Debug
-    } else if args.trace {
-        simplelog::LevelFilter::Trace
-    } else {
-        simplelog::LevelFilter::Info
-    };
-
-    let base_dump_path = Path::new("/tmp/");
-
     CombinedLogger::init(vec![TermLogger::new(
-        log_level,
+        args.log_level,
         simplelog::Config::default(),
         simplelog::TerminalMode::Mixed,
         simplelog::ColorChoice::Auto,
@@ -91,7 +75,9 @@ fn main() {
     .unwrap();
 
     // Connect to given reader
-    let mut interface = connect_to_interface_by_name(&args.reader, &args.path)
+    let mut interface = args
+        .backend
+        .connect(&args.reader)
         .expect("Couldn't find given interface.");
 
     // Select a nearby eMRTD
@@ -103,9 +89,8 @@ fn main() {
     let (_, _, parsed_data) = helpers::read_file_by_name(
         &mut smartcard,
         DataGroupEnum::EFCardAccess,
-        args.dump,
         &args.document_number.as_ref().unwrap(),
-        base_dump_path,
+        &args.dump_path,
     );
     let pace_available = parsed_data.is_some();
     if !pace_available {
@@ -123,9 +108,8 @@ fn main() {
         helpers::read_file(
             &mut smartcard,
             dg_info,
-            args.dump,
             &args.document_number.as_ref().unwrap(),
-            base_dump_path,
+            &args.dump_path,
         );
     }
 
@@ -150,9 +134,8 @@ fn main() {
     let (_, _, parse_result) = helpers::secure_read_file_by_name(
         &mut smartcard,
         DataGroupEnum::EFCom,
-        args.dump,
         &args.document_number.as_ref().unwrap(),
-        base_dump_path,
+        &args.dump_path,
         true,
         &mut ssc,
         &ks_enc,
@@ -171,7 +154,7 @@ fn main() {
         if dg_info.name == "EF.COM"
             || !dg_info.in_lds1
             || dg_info.pace_only
-            || (dg_info.is_binary && !args.dump)
+            || (dg_info.is_binary && args.dump_path.is_none())
             || !ef_com_file.data_group_tag_list.contains(&dg_info.tag)
         {
             continue;
@@ -180,9 +163,8 @@ fn main() {
         helpers::secure_read_file(
             &mut smartcard,
             dg_info,
-            args.dump,
             &args.document_number.as_ref().unwrap(),
-            base_dump_path,
+            &args.dump_path,
             true,
             &mut ssc,
             &ks_enc,
@@ -190,7 +172,7 @@ fn main() {
         );
     }
 
-    // TODO: Read and compare EF_SOD
+    // TODO: Read EF_SOD and compare hashes of files
 
     drop(smartcard);
 }

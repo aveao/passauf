@@ -1,8 +1,19 @@
-// use asn1;
 use simplelog::warn;
+use std::{error::Error, fmt};
 use strum::FromRepr;
 
 use crate::{dg_parsers::helpers as dg_helpers, icao9303};
+
+#[derive(Debug)]
+pub struct ParseError {}
+
+impl Error for ParseError {}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Failed to parse value from given String.")
+    }
+}
 
 // handy: https://oid-rep.orange-labs.fr/get/0.4.0.127.0.7.2.2.2
 // pub static PACE_DOMAIN_PARAMETERS_OIDS: phf::Map<&'static str, &'static asn1::ObjectIdentifier> = phf_map! {

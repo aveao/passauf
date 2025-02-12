@@ -2,7 +2,7 @@ use iso7816_tlv::ber;
 use simplelog::warn;
 use std::cmp::max;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::PathBuf;
 
 use crate::icao9303;
 use crate::iso7816;
@@ -100,17 +100,15 @@ pub fn get_tlv_by_tag(tlvs: &Vec<ber::Tlv>, desired_tag_number: u16) -> Option<&
 pub fn read_file_by_name<'a>(
     smartcard: &'a mut Box<impl Smartcard + ?Sized>,
     file: icao9303::DataGroupEnum,
-    dump: bool,
     document_number: &String,
-    base_dump_path: &Path,
+    base_dump_path: &Option<PathBuf>,
 ) -> (
     &'a icao9303::DataGroup,
     Option<Vec<u8>>,
     Option<ParsedDataGroup>,
 ) {
     let dg_info = &icao9303::DATA_GROUPS[file as usize];
-    let (file_read, parsed_data) =
-        read_file(smartcard, &dg_info, dump, document_number, base_dump_path);
+    let (file_read, parsed_data) = read_file(smartcard, &dg_info, document_number, base_dump_path);
     return (dg_info, file_read, parsed_data);
 }
 
@@ -120,14 +118,12 @@ pub fn read_file_by_name<'a>(
 pub fn read_file(
     smartcard: &mut Box<impl Smartcard + ?Sized>,
     dg_info: &icao9303::DataGroup,
-    dump: bool,
     document_number: &String,
-    base_dump_path: &Path,
+    base_dump_path: &Option<PathBuf>,
 ) -> (Option<Vec<u8>>, Option<ParsedDataGroup>) {
     return secure_read_file(
         smartcard,
         &dg_info,
-        dump,
         document_number,
         base_dump_path,
         false,
@@ -143,9 +139,8 @@ pub fn read_file(
 pub fn secure_read_file_by_name<'a>(
     smartcard: &'a mut Box<impl Smartcard + ?Sized>,
     file: icao9303::DataGroupEnum,
-    dump: bool,
     document_number: &String,
-    base_dump_path: &Path,
+    base_dump_path: &Option<PathBuf>,
     secure_comms: bool,
     ssc: &mut u64,
     ks_enc: &Vec<u8>,
@@ -159,7 +154,6 @@ pub fn secure_read_file_by_name<'a>(
     let (file_read, parsed_data) = secure_read_file(
         smartcard,
         &dg_info,
-        dump,
         document_number,
         base_dump_path,
         secure_comms,
@@ -176,9 +170,8 @@ pub fn secure_read_file_by_name<'a>(
 pub fn secure_read_file(
     smartcard: &mut Box<impl Smartcard + ?Sized>,
     dg_info: &icao9303::DataGroup,
-    dump: bool,
     document_number: &String,
-    base_dump_path: &Path,
+    base_dump_path: &Option<PathBuf>,
     secure_comms: bool,
     ssc: &mut u64,
     ks_enc: &Vec<u8>,
@@ -192,8 +185,13 @@ pub fn secure_read_file(
             parsed_data = (dg_info.parser)(&file_data, &dg_info, true);
             let filename = format!("{}-{}", document_number, dg_info.name).replace(".", "_");
 
-            if dump {
-                let _ = (dg_info.dumper)(&file_data, &parsed_data, base_dump_path, &filename);
+            if base_dump_path.is_some() {
+                let _ = (dg_info.dumper)(
+                    &file_data,
+                    &parsed_data,
+                    base_dump_path.as_ref().unwrap(),
+                    &filename,
+                );
             }
         }
         None => {}
