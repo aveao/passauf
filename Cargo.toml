@@ -8,11 +8,9 @@ bincode = { version = "1.3", optional = true }
 serialport = { version = "4.7", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 bitflags = { version = "2.8", optional = true }
-# compile out debug and trace calls on release builds
-log = { version= "0.4", features = ["release_max_level_info"] }
 simplelog = { version = "0.12", features = ["paris"] }
 strum = { version = "0.26", features = ["derive"] }
-asn1 = "0.20"
+asn1 = { version = "0.20", optional = true }
 rand = "0.9"
 # these are pending cipher/digest release
 retail-mac = "0.1.0"
@@ -33,7 +31,7 @@ pcsc = []
 # cli tool inclusion
 cli = ["dep:clap", "clap/derive"]
 # PACE support. Empty for now but we'll surely need some libs for it, right?
-pace = []
+pace = ["dep:asn1"]
 
 [patch.crates-io]
 retail-mac = { git = 'https://github.com/RustCrypto/MACs.git' }

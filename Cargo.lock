@@ -430,7 +430,6 @@ dependencies = [
  "clap",
  "des",
  "iso7816-tlv",
- "log",
  "rand",
  "retail-mac",
  "serde",
