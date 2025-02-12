@@ -3,8 +3,7 @@ use crate::helpers;
 use crate::icao9303;
 use crate::types;
 use iso7816_tlv::ber;
-use simplelog::warn;
-use simplelog::{debug, info};
+use simplelog::{debug, info, warn};
 
 impl types::EFDG11 {
     #[cfg(feature = "cli")]
