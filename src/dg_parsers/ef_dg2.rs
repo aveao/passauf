@@ -66,7 +66,7 @@ pub fn dumper(
 
     // Dump all biometrics
     for (i, biometric) in ef_dg2_file.biometrics.iter().enumerate() {
-        let image_filename = format!("{}-pic_{}", base_filename, i + 1);
+        let image_filename = format!("{}-pic{}", base_filename, i + 1);
         let mut file_path = base_path.join(image_filename);
         file_path.set_extension(biometric.image_format.get_extension());
 

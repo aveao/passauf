@@ -182,7 +182,8 @@ fn main() {
                     "{}-{}",
                     &args.document_number.as_ref().unwrap(),
                     dg_info.name
-                ).replace(".", "_");
+                )
+                .replace(".", "_");
 
                 if args.dump {
                     let _ = (dg_info.dumper)(&file_data, &parsed_data, &base_dump_path, &filename);
