@@ -4,14 +4,50 @@ use crate::helpers;
 use crate::icao9303;
 use crate::types;
 use iso7816_tlv::ber;
-use simplelog::warn;
-use simplelog::{debug, info};
+use simplelog::{debug, info, warn};
 use std::{fs, io, path::Path};
+
+impl types::EFDG2 {
+    #[cfg(feature = "cli")]
+    pub fn fancy_print(&self, data_group: &icao9303::DataGroup) {
+        dg_helpers::print_section_intro(data_group);
+        for (i, biometric) in self.biometrics.iter().enumerate() {
+            info!("<b><u>Biometric #{}</>", i);
+
+            dg_helpers::print_option_binary_element("Header version", &biometric.header_version);
+            dg_helpers::print_option_binary_element("Biometric type", &biometric.biometric_type);
+            dg_helpers::print_option_debug_element(
+                "Biometric subtype",
+                &biometric.biometric_sub_type,
+            );
+            dg_helpers::print_option_binary_element(
+                "Creation timestamp",
+                &biometric.creation_timestamp,
+            );
+            dg_helpers::print_option_binary_element(
+                "Validity period",
+                &biometric.validity_period_from_through,
+            );
+            dg_helpers::print_option_binary_element(
+                "Creator of biometric data",
+                &biometric.creator_of_biometric_data,
+            );
+            dg_helpers::print_option_binary_element("Format owner", &Some(&biometric.format_owner));
+            dg_helpers::print_option_binary_element("Format type", &Some(&biometric.format_type));
+            dg_helpers::print_string_element(
+                "Image format",
+                &biometric.image_format.get_extension(),
+            );
+            dg_helpers::print_option_binary_element("Image Data", &Some(&biometric.data));
+        }
+        info!("");
+    }
+}
 
 pub fn parser(
     data: &Vec<u8>,
     data_group: &icao9303::DataGroup,
-    _print_data: bool,
+    print_data: bool,
 ) -> Option<types::ParsedDataGroup> {
     // Parse the base TLV
     let base_tlv = ber::Tlv::parse(data).0.ok()?;
@@ -37,10 +73,10 @@ pub fn parser(
     let result = types::EFDG2 {
         biometrics: biometrics,
     };
-    // if print_data {
-    //     #[cfg(feature = "cli")]
-    //     result.fancy_print(data_group);
-    // }
+    if print_data {
+        #[cfg(feature = "cli")]
+        result.fancy_print(data_group);
+    }
     return Some(types::ParsedDataGroup::EFDG2(result));
 }
 
