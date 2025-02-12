@@ -12,7 +12,12 @@ impl types::EFDG2 {
     pub fn fancy_print(&self, data_group: &icao9303::DataGroup) {
         dg_helpers::print_section_intro(data_group);
         for (i, biometric) in self.biometrics.iter().enumerate() {
-            info!("<b><u>Biometric #{}</>", i);
+            info!(
+                "{:^pad_len$}",
+                format!("<b><u>Biometric #{}</>", i),
+                // + 6 for b, u and /
+                pad_len = dg_helpers::SECTION_TITLE_PAD_TO_LEN + 9
+            );
 
             dg_helpers::print_option_binary_element("Header version", &biometric.header_version);
             dg_helpers::print_option_binary_element("Biometric type", &biometric.biometric_type);

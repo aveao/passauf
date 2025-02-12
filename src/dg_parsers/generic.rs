@@ -12,7 +12,12 @@ pub fn parser(
 ) -> Option<types::ParsedDataGroup> {
     if print_data {
         dg_helpers::print_section_intro(data_group);
-        info!("(No parser available for {})", data_group.name);
+        info!(
+            "{:^pad_len$}",
+            format!("<b>(No parser available for {})</>", data_group.name),
+            // + 6 for bold
+            pad_len = dg_helpers::SECTION_TITLE_PAD_TO_LEN + 6
+        );
         dg_helpers::print_option_binary_element(
             &format!("Raw data ({}b)", data.len()),
             &Some(data),

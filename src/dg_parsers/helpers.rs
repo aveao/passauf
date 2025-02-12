@@ -4,7 +4,7 @@ use std::{cmp::max, collections::HashMap};
 
 use crate::{helpers, icao9303, types};
 
-const SECTION_TITLE_PAD_TO_LEN: usize = 56;
+pub(crate) const SECTION_TITLE_PAD_TO_LEN: usize = 56;
 const PRINT_TITLE_PAD_TO_LEN: usize = 25;
 
 pub(crate) fn tlv_get_string_value(tlvs: &HashMap<u16, &ber::Tlv>, tag: &u16) -> Option<String> {
