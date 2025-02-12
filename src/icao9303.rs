@@ -169,8 +169,8 @@ pub static DATA_GROUPS: [DataGroup; 22] = [
         pace_only: false,
         eac_only: false,
         in_lds1: true,
-        parser: dg_parsers::generic::parser,
-        dumper: dg_parsers::generic::dumper,
+        parser: dg_parsers::ef_dg7::parser,
+        dumper: dg_parsers::ef_dg7::dumper,
         is_binary: false,
     },
     DataGroup {

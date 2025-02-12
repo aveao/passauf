@@ -266,6 +266,14 @@ pub struct EFDG5 {
 }
 
 #[derive(Debug)]
+pub struct EFDG7 {
+    // ICAO 9303 part 10, edition 8, 4.7.7
+    /// Displayed Signatures or Usual Mark
+    /// Vector of JPEG files (as Vec<u8>)
+    pub displayed_signatures: Vec<Vec<u8>>,
+}
+
+#[derive(Debug)]
 pub struct EFDG11 {
     // ICAO 9303 part 10, edition 8, 4.7.11
     pub full_name: Option<String>,
@@ -310,6 +318,7 @@ pub enum ParsedDataGroup {
     EFDG1(EFDG1),
     EFDG2(EFDG2),
     EFDG5(EFDG5),
+    EFDG7(EFDG7),
     EFDG11(EFDG11),
     EFDG12(EFDG12),
 }
