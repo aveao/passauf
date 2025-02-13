@@ -1,6 +1,5 @@
 use crate::dg_parsers::helpers as dg_helpers;
 use crate::helpers;
-use crate::icao9303;
 use crate::types;
 use iso7816_tlv::ber;
 use simplelog::{debug, info, warn};
@@ -71,9 +70,19 @@ impl types::TD3Mrz {
     }
 }
 
+impl types::MRZ {
+    #[cfg(feature = "cli")]
+    pub fn fancy_print(&self) {
+        match self {
+            Self::TD1(mrzobj) => mrzobj.fancy_print(),
+            Self::TD3(mrzobj) => mrzobj.fancy_print(),
+        }
+    }
+}
+
 impl types::EFDG1 {
     #[cfg(feature = "cli")]
-    pub fn fancy_print(&self, data_group: &icao9303::DataGroup) {
+    pub fn fancy_print(&self, data_group: &types::DataGroup) {
         dg_helpers::print_section_intro(data_group);
         self.mrz.fancy_print();
         info!("");
@@ -82,7 +91,7 @@ impl types::EFDG1 {
 
 pub fn parser(
     data: &Vec<u8>,
-    data_group: &icao9303::DataGroup,
+    data_group: &types::DataGroup,
     print_data: bool,
 ) -> Option<types::ParsedDataGroup> {
     // Parse the base TLV

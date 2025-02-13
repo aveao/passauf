@@ -1,14 +1,14 @@
-use std::cmp::min;
-
-///! ISO 7816 APDU handlers (for ICAO 9303 only)
 use iso7816_tlv::ber;
 use simplelog::{debug, error, trace};
 use simplelog::{info, warn};
+///! ISO 7816 APDU handlers (for ICAO 9303 only)
+use std::cmp::min;
 use strum::{FromRepr, IntoStaticStr};
 
 use crate::helpers;
 use crate::icao9303;
 use crate::smartcard_abstractions::Smartcard;
+use crate::types;
 
 #[repr(u8)]
 pub enum Command {
@@ -293,7 +293,7 @@ impl ApduCommand {
 
 pub fn select_and_read_file(
     smartcard: &mut Box<impl Smartcard + ?Sized>,
-    dg_info: &icao9303::DataGroup,
+    dg_info: &types::DataGroup,
     secure_comms: bool,
     ssc: &mut u64,
     ks_enc: &Vec<u8>,

@@ -1,7 +1,6 @@
 use crate::dg_parsers::generic::dumper as generic_dumper;
 use crate::dg_parsers::helpers as dg_helpers;
 use crate::helpers;
-use crate::icao9303;
 use crate::types;
 use iso7816_tlv::ber;
 use simplelog::{debug, info, warn};
@@ -9,7 +8,7 @@ use std::{fs, io, path::Path};
 
 impl types::EFDG2 {
     #[cfg(feature = "cli")]
-    pub fn fancy_print(&self, data_group: &icao9303::DataGroup) {
+    pub fn fancy_print(&self, data_group: &types::DataGroup) {
         dg_helpers::print_section_intro(data_group);
         for (i, biometric) in self.biometrics.iter().enumerate() {
             info!(
@@ -51,7 +50,7 @@ impl types::EFDG2 {
 
 pub fn parser(
     data: &Vec<u8>,
-    data_group: &icao9303::DataGroup,
+    data_group: &types::DataGroup,
     print_data: bool,
 ) -> Option<types::ParsedDataGroup> {
     // Parse the base TLV

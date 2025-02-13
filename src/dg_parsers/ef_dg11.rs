@@ -1,13 +1,12 @@
 use crate::dg_parsers::helpers as dg_helpers;
 use crate::helpers;
-use crate::icao9303;
 use crate::types;
 use iso7816_tlv::ber;
 use simplelog::{debug, info, warn};
 
 impl types::EFDG11 {
     #[cfg(feature = "cli")]
-    pub fn fancy_print(&self, data_group: &icao9303::DataGroup) {
+    pub fn fancy_print(&self, data_group: &types::DataGroup) {
         dg_helpers::print_section_intro(data_group);
         dg_helpers::print_option_string_element_as_name("Full name of holder", &self.full_name);
         dg_helpers::print_option_debug_element("Other names", &self.other_names);
@@ -34,7 +33,7 @@ impl types::EFDG11 {
 
 pub fn parser(
     data: &Vec<u8>,
-    data_group: &icao9303::DataGroup,
+    data_group: &types::DataGroup,
     print_data: bool,
 ) -> Option<types::ParsedDataGroup> {
     // Parse the base TLV

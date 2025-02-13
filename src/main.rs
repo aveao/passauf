@@ -8,10 +8,10 @@ mod smartcard_abstractions;
 mod types;
 
 use clap::Parser;
-use icao9303::DataGroupEnum;
 use simplelog::{info, warn, CombinedLogger, TermLogger};
 use smartcard_abstractions::{InterfaceDevice, ReaderInterface};
 use std::path::PathBuf;
+use types::DataGroupEnum;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -104,7 +104,7 @@ fn main() {
     }
 
     // Read all files under the master file
-    for dg_info in icao9303::DATA_GROUPS.iter() {
+    for dg_info in types::DATA_GROUPS.iter() {
         if dg_info.name == "EF.CardAccess"
             || dg_info.in_lds1
             || (dg_info.pace_only && !pace_available)
@@ -156,7 +156,7 @@ fn main() {
     };
 
     // read all files under the LDS1 file
-    for dg_info in icao9303::DATA_GROUPS.iter() {
+    for dg_info in types::DATA_GROUPS.iter() {
         if dg_info.name == "EF.COM"
             || !dg_info.in_lds1
             || dg_info.pace_only

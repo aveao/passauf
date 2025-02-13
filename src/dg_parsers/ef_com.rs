@@ -1,13 +1,12 @@
 use crate::dg_parsers::helpers as dg_helpers;
 use crate::helpers;
-use crate::icao9303;
 use crate::types;
 use iso7816_tlv::ber;
 use simplelog::{debug, info, warn};
 
 impl types::EFCom {
     #[cfg(feature = "cli")]
-    pub fn fancy_print(&self, data_group: &icao9303::DataGroup) {
+    pub fn fancy_print(&self, data_group: &types::DataGroup) {
         dg_helpers::print_section_intro(data_group);
         dg_helpers::print_option_binary_element("LDS Version", &self.lds_version);
         dg_helpers::print_option_string_element("Unicode Version", &self.unicode_version);
@@ -18,7 +17,7 @@ impl types::EFCom {
             pad_len = 56
         );
 
-        for dg_info in icao9303::DATA_GROUPS.iter() {
+        for dg_info in types::DATA_GROUPS.iter() {
             if self.data_group_tag_list.contains(&dg_info.tag) {
                 info!(
                     "{:>pad_len$} <yellow>{}</>",
@@ -34,7 +33,7 @@ impl types::EFCom {
 
 pub fn parser(
     data: &Vec<u8>,
-    data_group: &icao9303::DataGroup,
+    data_group: &types::DataGroup,
     print_data: bool,
 ) -> Option<types::ParsedDataGroup> {
     // Parse the base TLV

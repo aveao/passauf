@@ -1,13 +1,12 @@
 use std::{fs, io, path::Path};
 
 use crate::dg_parsers::helpers as dg_helpers;
-use crate::icao9303;
 use crate::types;
 use simplelog::info;
 
 pub fn parser(
     data: &Vec<u8>,
-    data_group: &icao9303::DataGroup,
+    data_group: &types::DataGroup,
     print_data: bool,
 ) -> Option<types::ParsedDataGroup> {
     if print_data {

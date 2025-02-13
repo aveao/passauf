@@ -5,9 +5,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::icao9303;
 use crate::iso7816;
 use crate::smartcard_abstractions::Smartcard;
+use crate::types;
 use crate::types::ParsedDataGroup;
 
 pub fn asn1_parse_len(data: Vec<u8>) -> (u8, u32) {
@@ -100,15 +100,15 @@ pub fn get_tlv_by_tag(tlvs: &Vec<ber::Tlv>, desired_tag_number: u16) -> Option<&
 /// Returns (dg_info, file_read, parsed_data)
 pub fn read_file_by_name<'a>(
     smartcard: &'a mut Box<impl Smartcard + ?Sized>,
-    file: icao9303::DataGroupEnum,
+    file: types::DataGroupEnum,
     filename_distinguisher: &String,
     base_dump_path: &Option<PathBuf>,
 ) -> (
-    &'a icao9303::DataGroup,
+    &'a types::DataGroup,
     Option<Vec<u8>>,
     Option<ParsedDataGroup>,
 ) {
-    let dg_info = &icao9303::DATA_GROUPS[file as usize];
+    let dg_info = &types::DATA_GROUPS[file as usize];
     let (file_read, parsed_data) =
         read_file(smartcard, &dg_info, filename_distinguisher, base_dump_path);
     return (dg_info, file_read, parsed_data);
@@ -119,7 +119,7 @@ pub fn read_file_by_name<'a>(
 /// Returns (file_read, parsed_data)
 pub fn read_file(
     smartcard: &mut Box<impl Smartcard + ?Sized>,
-    dg_info: &icao9303::DataGroup,
+    dg_info: &types::DataGroup,
     filename_distinguisher: &String,
     base_dump_path: &Option<PathBuf>,
 ) -> (Option<Vec<u8>>, Option<ParsedDataGroup>) {
@@ -140,7 +140,7 @@ pub fn read_file(
 /// Returns (dg_info, file_read, parsed_data)
 pub fn secure_read_file_by_name<'a>(
     smartcard: &'a mut Box<impl Smartcard + ?Sized>,
-    file: icao9303::DataGroupEnum,
+    file: types::DataGroupEnum,
     filename_distinguisher: &String,
     base_dump_path: &Option<PathBuf>,
     secure_comms: bool,
@@ -148,11 +148,11 @@ pub fn secure_read_file_by_name<'a>(
     ks_enc: &Vec<u8>,
     ks_mac: &Vec<u8>,
 ) -> (
-    &'a icao9303::DataGroup,
+    &'a types::DataGroup,
     Option<Vec<u8>>,
     Option<ParsedDataGroup>,
 ) {
-    let dg_info = &icao9303::DATA_GROUPS[file as usize];
+    let dg_info = &types::DATA_GROUPS[file as usize];
     let (file_read, parsed_data) = secure_read_file(
         smartcard,
         &dg_info,
@@ -171,7 +171,7 @@ pub fn secure_read_file_by_name<'a>(
 /// Returns (file_read, parsed_data)
 pub fn secure_read_file(
     smartcard: &mut Box<impl Smartcard + ?Sized>,
-    dg_info: &icao9303::DataGroup,
+    dg_info: &types::DataGroup,
     filename_distinguisher: &String,
     base_dump_path: &Option<PathBuf>,
     secure_comms: bool,
