@@ -1,5 +1,5 @@
 use simplelog::warn;
-use std::{error::Error, fmt};
+use std::{cmp::min, error::Error, fmt};
 use strum::FromRepr;
 
 use crate::{dg_parsers::helpers as dg_helpers, icao9303};
@@ -534,22 +534,43 @@ impl TD1Mrz {
         if input.len() != 90 {
             return None;
         }
-        // TODO: ICAO 9303 p5, Edition 8, 4.2.2.3, Note j says:
+        // ICAO 9303 p5, Edition 8, 4.2.2.3, Note j says:
         // "The number of characters in the VIZ may be variable; however, if the document number has more than 9
         // characters, the 9 principal characters shall be shown in the MRZ in character positions 6 to 14. They shall be
         // followed by a filler character instead of a check digit to indicate a truncated number. The remaining characters
         // of the document number shall be shown at the beginning of the field reserved for optional data elements
         // (character positions 16 to 30 of the upper machine readable line) followed by a check digit and a filler character."
+        let mut document_number = dg_helpers::remove_mrz_padding(&input[5..14].to_string());
+        let mut document_number_check_digit = input.chars().nth(14)?;
+        let mut optional_data_elements_line_1 =
+            dg_helpers::remove_mrz_padding(&input[15..30].to_string());
+        // Check if this is truncated document number
+        if document_number_check_digit == '<' {
+            // Find the < separating the rest of document number from optional data elements
+            let end_of_doc_number = optional_data_elements_line_1
+                .find('<')
+                .unwrap_or(optional_data_elements_line_1.len());
+            // Add the rest of the document number into the document number field and set new check digit
+            document_number.push_str(&optional_data_elements_line_1[..end_of_doc_number - 1]);
+            document_number_check_digit = optional_data_elements_line_1
+                .chars()
+                .nth(end_of_doc_number - 1)?;
+            // Cut off rest of the document number from optional data elements.
+            // Ensure we don't go over the size. Normally this shouldn't happen if the document number
+            // follows the standard (the filler character is present), but this implementation assumes
+            // that some implementations may max out the size of optional elements.
+            optional_data_elements_line_1 = optional_data_elements_line_1
+                [min(end_of_doc_number + 1, optional_data_elements_line_1.len())..]
+                .to_string();
+        }
         return Some(TD1Mrz {
             raw_mrz: input.to_string(),
             // Line 1
             document_code: input[0..2].to_string(),
             issuing_state: dg_helpers::remove_mrz_padding(&input[2..5].to_string()),
-            document_number: dg_helpers::remove_mrz_padding(&input[5..14].to_string()),
-            document_number_check_digit: input.chars().nth(14)?,
-            optional_data_elements_line_1: dg_helpers::remove_mrz_padding(
-                &input[15..30].to_string(),
-            ),
+            document_number: document_number,
+            document_number_check_digit: document_number_check_digit,
+            optional_data_elements_line_1: optional_data_elements_line_1,
             // Line 2
             date_of_birth: input[30..36].to_string(),
             date_of_birth_check_digit: input.chars().nth(36)?,
@@ -581,6 +602,38 @@ impl TD1Mrz {
             date_of_expiry_valid,
             composite_valid,
         ];
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn td1_short_document_number_parsing() {
+        let mrz = &"I<UTO1234567897ABCDEFGH<<<<<<<0001029<3001020UTO<<<<<<<<<<<8MUSTERMANN<<ERIKA<<<<<<<<<<<<<".to_string();
+        let result = TD1Mrz::deserialize(mrz).unwrap();
+        assert_eq!(result.document_number, "123456789");
+        assert_eq!(result.document_number_check_digit, '7');
+        assert_eq!(result.optional_data_elements_line_1, "ABCDEFGH");
+    }
+
+    #[test]
+    fn td1_long_document_number_parsing() {
+        let mrz = &"I<UTO123456789<ABCD3<TEST<<<<<0001029<3001020UTO<<<<<<<<<<<2MUSTERMANN<<ERIKA<<<<<<<<<<<<<".to_string();
+        let result = TD1Mrz::deserialize(mrz).unwrap();
+        assert_eq!(result.document_number, "123456789ABCD");
+        assert_eq!(result.document_number_check_digit, '3');
+        assert_eq!(result.optional_data_elements_line_1, "TEST");
+    }
+
+    #[test]
+    fn td1_full_length_document_number_parsing() {
+        let mrz = &"I<UTO123456789<ABCDABCDABCDAB60001029<3001020UTO<<<<<<<<<<<0MUSTERMANN<<ERIKA<<<<<<<<<<<<<".to_string();
+        let result = TD1Mrz::deserialize(mrz).unwrap();
+        assert_eq!(result.document_number, "123456789ABCDABCDABCDAB");
+        assert_eq!(result.document_number_check_digit, '6');
+        assert_eq!(result.optional_data_elements_line_1, "");
     }
 }
 
