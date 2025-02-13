@@ -6,7 +6,7 @@ use iso7816_tlv::ber;
 use simplelog::{debug, info, warn};
 use std::{fs, io, path::Path};
 
-impl types::EFDG2 {
+impl types::EFDG2_3_4 {
     #[cfg(feature = "cli")]
     pub fn fancy_print(&self, data_group: &types::DataGroup) {
         dg_helpers::print_section_intro(data_group);
@@ -74,14 +74,14 @@ pub fn parser(
     );
 
     // Deserialize the file from the given TLV data.
-    let result = types::EFDG2 {
+    let result = types::EFDG2_3_4 {
         biometrics: biometrics,
     };
     if print_data {
         #[cfg(feature = "cli")]
         result.fancy_print(data_group);
     }
-    return Some(types::ParsedDataGroup::EFDG2(result));
+    return Some(types::ParsedDataGroup::EFDG2_3_4(result));
 }
 
 pub fn dumper(
@@ -93,12 +93,12 @@ pub fn dumper(
     generic_dumper(file_data, parsed_data, base_path, &base_filename)?;
 
     if parsed_data.is_none() {
-        warn!("Could not dump EF_DG2 pictures, parsed data is empty.");
+        warn!("Could not dump EF_DG2/3/4 pictures, parsed data is empty.");
         return Ok(());
     }
 
-    let ef_dg2_file: &types::EFDG2 = match parsed_data.as_ref().unwrap() {
-        types::ParsedDataGroup::EFDG2(file) => file,
+    let ef_dg2_file: &types::EFDG2_3_4 = match parsed_data.as_ref().unwrap() {
+        types::ParsedDataGroup::EFDG2_3_4(file) => file,
         _ => {
             panic!("Expected EFDG2 but got {:x?}", parsed_data);
         }

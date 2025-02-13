@@ -88,8 +88,8 @@ pub static DATA_GROUPS: [DataGroup; 22] = [
         pace_only: false,
         eac_only: false,
         in_lds1: true,
-        parser: dg_parsers::ef_dg2::parser,
-        dumper: dg_parsers::ef_dg2::dumper,
+        parser: dg_parsers::ef_dg2_3_4::parser,
+        dumper: dg_parsers::ef_dg2_3_4::dumper,
         is_binary: true,
     },
     DataGroup {
@@ -101,8 +101,8 @@ pub static DATA_GROUPS: [DataGroup; 22] = [
         pace_only: false,
         eac_only: true,
         in_lds1: true,
-        parser: dg_parsers::ef_dg2::parser,
-        dumper: dg_parsers::ef_dg2::dumper,
+        parser: dg_parsers::ef_dg2_3_4::parser,
+        dumper: dg_parsers::ef_dg2_3_4::dumper,
         is_binary: true,
     },
     DataGroup {
@@ -114,8 +114,8 @@ pub static DATA_GROUPS: [DataGroup; 22] = [
         pace_only: false,
         eac_only: true,
         in_lds1: true,
-        parser: dg_parsers::ef_dg2::parser,
-        dumper: dg_parsers::ef_dg2::dumper,
+        parser: dg_parsers::ef_dg2_3_4::parser,
+        dumper: dg_parsers::ef_dg2_3_4::dumper,
         is_binary: true,
     },
     DataGroup {

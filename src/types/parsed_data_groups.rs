@@ -51,8 +51,8 @@ pub struct Biometric {
 }
 
 #[derive(Debug)]
-pub struct EFDG2 {
-    // ICAO 9303 part 10, edition 8, 4.7.2
+pub struct EFDG2_3_4 {
+    // ICAO 9303 part 10, edition 8, 4.7.2/3/4
     pub biometrics: Vec<Biometric>,
 }
 
@@ -114,7 +114,7 @@ pub struct EFDG12 {
 pub enum ParsedDataGroup {
     EFCom(EFCom),
     EFDG1(EFDG1),
-    EFDG2(EFDG2),
+    EFDG2_3_4(EFDG2_3_4),
     EFDG5(EFDG5),
     EFDG7(EFDG7),
     EFDG11(EFDG11),
