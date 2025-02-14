@@ -13,7 +13,7 @@ strum = { version = "0.26", features = ["derive"] }
 asn1 = { version = "0.20", optional = true }
 rand = "0.9"
 # these are pending cipher/digest release
-retail-mac = "0.1.0"
+retail-mac = "0.1.0-pre.0"
 sha1 = "0.11.0-pre.4"
 des = "0.9.0-pre.2"
 cbc = { version = "0.2.0-pre.2", features = ["alloc"] }
@@ -33,8 +33,5 @@ cli = ["dep:clap", "clap/derive"]
 # PACE support. Empty for now but we'll surely need some libs for it, right?
 pace = ["dep:asn1"]
 
-[patch.crates-io]
-retail-mac = { git = 'https://github.com/RustCrypto/MACs.git' }
-# inout = { path = "/tmp/utils/inout" }
-# cbc = { path = "/tmp/block-modes/cbc" }
-# des = { path = "/tmp/block-ciphers/des" }
+# [patch.crates-io]
+# retail-mac = { git = 'https://github.com/RustCrypto/MACs.git' }

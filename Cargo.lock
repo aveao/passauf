@@ -520,8 +520,9 @@ dependencies = [
 
 [[package]]
 name = "retail-mac"
-version = "0.1.0"
-source = "git+https://github.com/RustCrypto/MACs.git#7ae6d75f27f45e7e3ce7f52047a9197745e3f212"
+version = "0.1.0-pre.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1964ae4ff96a5aa5c4acdc1dbf409203fc14117a05c6ec00a5e974adb4718c08"
 dependencies = [
  "cipher",
  "digest",
