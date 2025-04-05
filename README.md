@@ -30,7 +30,7 @@ passauf -n A123B234 -b 030201 -e 350212
 - By default, no files are dumped. To dump a document, you can add `--dump`. If you want the files to be put to a specific location, you can use `--dump path` syntax (like `--dump /tmp`), by default it'll use the current work directory.
     - When `--dump` is present, all files on the document that can be read are read, parsed, displayed and dumped.
     - When `--dump` isn't present, only the non-binary files are read, parsed and displayed.
-- By default, we assume that you're using a proxmark (as PCSC isn't supported yet). To pick a different reader backend, you can use `--backend`, like `--backend pcsc` or `--backend proxmark`.
+- By default, we assume that you're using PCSC. To pick a different reader backend, you can use `--backend`, like `--backend pcsc` or `--backend proxmark`.
 - By default we'll try to find a reader based on available USB devices. To pick a specific reader, you can use `--reader PATH`, like `--reader /dev/ttyACM0`.
 
 Here's a relatively complete example showing all main flags in use:

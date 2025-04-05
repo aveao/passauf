@@ -9,7 +9,7 @@ mod types;
 
 use clap::Parser;
 use simplelog::{info, warn, CombinedLogger, TermLogger};
-use smartcard_abstractions::{InterfaceDevice, ReaderInterface};
+use smartcard_abstractions::ReaderInterface;
 use std::path::PathBuf;
 use types::DataGroupEnum;
 
@@ -25,7 +25,7 @@ struct CliArgs {
     reader: Option<String>,
 
     /// Reader backend interface to use.
-    #[arg(short = 'i', long, value_name = "proxmark/pcsc", ignore_case = true, default_value_t = ReaderInterface::Proxmark)]
+    #[arg(short = 'i', long, value_name = "proxmark/pcsc", ignore_case = true, default_value_t = ReaderInterface::PCSC)]
     backend: ReaderInterface,
 
     /// Date of birth, YYMMDD (Requires DoE and Doc Number, mutually exclusive with CAN)

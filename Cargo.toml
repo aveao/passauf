@@ -20,14 +20,15 @@ cbc = { version = "0.2.0-pre.2", features = ["alloc"] }
 # end of packages pending cipher/digest release
 iso7816-tlv = "0.4.4"
 clap = { version = "4.5", features = ["derive"], optional = true }
+pcsc = { version = "2.9.0", optional = true }
 
 [features]
 # to make development easier, all features are on by default. this will change later.
 default = ["proxmark", "pcsc", "cli", "pace"]
 # Proxmark support
 proxmark = ["dep:serialport", "dep:serde", "serde/derive", "dep:bincode", "dep:bitflags"]
-# PCSC support. Empty for now.
-pcsc = []
+# PCSC support
+pcsc = ["dep:pcsc"]
 # cli tool inclusion
 cli = ["dep:clap", "clap/derive"]
 # PACE support. Empty for now but we'll surely need some libs for it, right?
