@@ -35,24 +35,25 @@ impl FromStr for ReaderInterface {
 }
 
 impl ReaderInterface {
-    pub fn connect<'a>(
-        &self,
-        path: &'a Option<String>,
-    ) -> Option<Box<impl InterfaceDevice + use<'a>>> {
+    pub fn connect(&self, path: &Option<String>) -> Option<Box<dyn InterfaceDevice>> {
         match self {
             ReaderInterface::Proxmark => {
-                #[cfg(feature = "proxmark")]
+                if !cfg!(feature = "proxmark") {
+                    error!("Cannot connect via Proxmark, feature was disabled at compile-time.");
+                    return None;
+                }
+
                 let proxmark_interface = ProxmarkInterface::connect(path.as_ref()).unwrap();
-                #[cfg(feature = "proxmark")]
                 return Some(Box::new(proxmark_interface));
-                return None;
             }
-            _ => {
-                #[cfg(feature = "pcsc")]
+            ReaderInterface::PCSC => {
+                if !cfg!(feature = "pcsc") {
+                    error!("Cannot connect via PCSC, feature was disabled at compile-time.");
+                    return None;
+                }
+
                 let pcsc_interface = PCSCInterface::connect(path.as_ref()).unwrap();
-                #[cfg(feature = "pcsc")]
                 return Some(Box::new(pcsc_interface));
-                return None;
             }
         };
     }
@@ -66,7 +67,9 @@ pub trait Smartcard: Drop {
 
 #[allow(drop_bounds)]
 pub trait InterfaceDevice: Drop {
-    fn connect(path: Option<&String>) -> Option<impl InterfaceDevice>;
+    fn connect(path: Option<&String>) -> Option<Self>
+    where
+        Self: Sized;
     fn select<'a>(&'a mut self) -> Option<Box<dyn Smartcard + 'a>>;
 }
 
@@ -94,7 +97,7 @@ impl Drop for ProxmarkInterface {
 
 #[cfg(feature = "proxmark")]
 impl InterfaceDevice for ProxmarkInterface {
-    fn connect(input_path: Option<&String>) -> Option<impl InterfaceDevice> {
+    fn connect(input_path: Option<&String>) -> Option<Self> {
         // If no path was supplied, try to find it.
         let path = match input_path {
             Some(data) => data,
@@ -205,7 +208,7 @@ impl Drop for PCSCInterface {
 
 #[cfg(feature = "pcsc")]
 impl InterfaceDevice for PCSCInterface {
-    fn connect(input_path: Option<&String>) -> Option<impl InterfaceDevice> {
+    fn connect(input_path: Option<&String>) -> Option<Self> {
         // Establish a PC/SC context.
         let ctx = match Context::establish(Scope::User) {
             Ok(ctx) => ctx,
@@ -285,7 +288,6 @@ pub struct PCSCSmartcard {
 impl Drop for PCSCSmartcard {
     fn drop(&mut self) {
         // Card implements Drop which automatically disconnects the card using Disposition::ResetCard.
-        return;
     }
 }
 
