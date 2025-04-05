@@ -251,16 +251,16 @@ impl ApduCommand {
             rapdu_data = smartcard.exchange_apdu(&apdu_bytes).unwrap();
             status_code_bytes = get_status_code_bytes(&rapdu_data);
 
-            // - 4 bytes for status code and and hash
+            // - 2 bytes for status code
             if secure_comms {
-                match parse_secure_rapdu(&rapdu_data[..rapdu_data.len() - 4], ssc, ks_enc, ks_mac) {
+                match parse_secure_rapdu(&rapdu_data[..rapdu_data.len() - 2], ssc, ks_enc, ks_mac) {
                     Some(data) => {
                         rapdu_data = data;
                     }
                     None => {}
                 };
             } else {
-                rapdu_data = rapdu_data[..rapdu_data.len() - 4].to_vec();
+                rapdu_data = rapdu_data[..rapdu_data.len() - 2].to_vec();
             }
 
             // ISO/IEC 7816-4 says:
@@ -447,7 +447,7 @@ pub const P1_SELECT_BY_NAME: u8 = 0x04;
 pub const P2_PROPRIETARY: u8 = 0x0C;
 
 pub fn get_status_code_bytes(data: &Vec<u8>) -> Vec<u8> {
-    let status_code_start = data.len() - 4;
+    let status_code_start = data.len() - 2;
     return data[status_code_start..status_code_start + 2].to_vec();
 }
 
