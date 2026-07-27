@@ -84,7 +84,7 @@ A PACE variant is a combination of a key agreement, a mapping, a cipher and a se
 | --- | --- | --- |
 | Generic Mapping (GM) | Yes | |
 | Integrated Mapping (IM) | Yes | |
-| Chip Authentication Mapping (CAM) | No | Recognized and reported, but not performed. It folds Chip Authentication into PACE, which passauf does not implement yet. |
+| Chip Authentication Mapping (CAM) | Yes | Folds Chip Authentication into PACE. See [Chip Authentication Mapping](#chip-authentication-mapping) for what its result does and does not prove. |
 
 ### Key agreement and ciphers
 
@@ -124,14 +124,23 @@ These are the parameter IDs of ICAO 9303 part 11, section 9.5.1.
 
 The unsupported curves are the ones with no usable Rust crate behind them. Implementing them would mean hand-rolling curve arithmetic, which is a correctness and side-channel risk out of proportion to how rarely they appear in real documents. If crates appear for them, adding them is a matter of a line each in `src/pace/ecdh.rs` and `src/pace/domain.rs`.
 
+### Chip Authentication Mapping
+
+PACE-CAM proves the chip holds the private key belonging to the Chip Authentication key it presents, which a cloned chip cannot do. The chip returns `CA_IC = SK_IC⁻¹ · SK_Map,IC` encrypted under the session key, and passauf checks that `CA_IC · PK_IC` reproduces the mapping key the chip used during PACE.
+
+`PK_IC` is read from **DG14**, which only becomes readable once secure messaging is up. The check is therefore deferred: PACE completes first, DG14 is read, and the verification runs afterwards. Its result is printed once DG14 has been parsed. Reading `PK_IC` from `EF.CardSecurity` instead is not implemented, as that is a CMS SignedData structure; documents carrying only `EF.CardSecurity` and no DG14 will report the check as unverified.
+
+**A CAM pass is not proof the document is genuine.** It only proves the chip holds the private key for the key *it gave us*. Nothing yet establishes that key belongs to a real issuing authority — that is Passive Authentication's job, and ICAO 9303 part 11 section 4.4.3.5.2 requires PA alongside CAM for exactly this reason. passauf does not validate `EF.SOD` yet, so treat a pass as "this chip is not a naive clone" rather than "this document is real".
+
 ### Also not implemented
 
 - Explicit (non-standardized) domain parameters carried in a `PACEDomainParameterInfo`. Documents that use these are rejected with an explanation rather than guessed at.
-- Terminal Authentication and Chip Authentication, and with them the `0x7F4C` Certificate Holder Authorization Template in MSE:Set AT.
+- Passive Authentication, i.e. validating `EF.SOD` and the certificate chain behind it. Without it, PACE-CAM's guarantee is limited as described above.
+- Terminal Authentication, and with it the `0x7F4C` Certificate Holder Authorization Template in MSE:Set AT. This is what would be needed to read EAC-protected data groups such as DG3 (fingerprints).
 
 ### Testing
 
-The PACE implementation is checked against the worked examples in ICAO 9303 part 11: Appendix G.1 (ECDH Generic Mapping on BrainpoolP256r1 with AES-128), G.2 (DH Generic Mapping in the 1024-bit MODP group) and H.1 (Integrated Mapping). Every intermediate value the appendices publish is asserted, including the mapped generators, shared secrets, session keys and authentication tokens, so `cargo test` covers the cryptography without needing a document or a reader.
+The PACE implementation is checked against the worked examples in ICAO 9303 part 11: Appendix G.1 (ECDH Generic Mapping on BrainpoolP256r1 with AES-128), G.2 (DH Generic Mapping in the 1024-bit MODP group), H.1 (Integrated Mapping) and I (Chip Authentication Mapping). Every intermediate value the appendices publish is asserted, including the mapped generators, shared secrets, session keys and authentication tokens, so `cargo test` covers the cryptography without needing a document or a reader.
 
 Two things in those appendices are worth knowing if you compare against them yourself:
 

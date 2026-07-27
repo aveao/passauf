@@ -12,22 +12,28 @@ combinations documents actually use, not a single hardcoded variant.
 
 Supported:
 
-- Mappings: Generic Mapping (GM), Integrated Mapping (IM)
+- Mappings: Generic Mapping (GM), Integrated Mapping (IM), Chip Authentication Mapping (CAM)
 - Key agreement: ECDH and DH
 - Ciphers: 3DES-CBC-CBC, AES-CBC-CMAC-128/192/256
 - Passwords: MRZ and CAN
 - Standardized domain parameters: 0, 1, 2 (MODP), 12, 13, 15, 16, 18 (ECP)
 
+Chip Authentication Mapping was added after the initial implementation, once a document turned up
+that offers it. Its verification is deferred until DG14 has been read, since the chip's static key
+is not reachable before secure messaging is up.
+
 Out of scope:
 
-- Chip Authentication Mapping (CAM). Recognized in the OID table so we can report it precisely,
-  but not performed.
 - Domain parameter IDs 8, 9, 10, 11, 14, 17. These are NIST P-192/P-224 and BrainpoolP192r1/
   P224r1/P320r1/P512r1, none of which have a usable Rust crate. Implementing them would mean
   hand-rolling curve arithmetic, which is a correctness and side-channel risk we are not taking.
   ID 10 (NIST P-224) additionally cannot be used with Integrated Mapping at all per the spec.
 - Explicit (non-standardized) domain parameters carried in PACEDomainParameterInfo.
-- Terminal Authentication, Chip Authentication, and the 0x7F4C CHAT data object.
+- Terminal Authentication and the 0x7F4C CHAT data object, and so EAC-protected data groups.
+- Passive Authentication. Section 4.4.3.5.2 requires it alongside CAM, so until it exists a CAM
+  pass only proves the chip holds the private key for the key it presented.
+- Reading the chip's Chip Authentication key from EF.CardSecurity, which is CMS SignedData. DG14
+  is used instead.
 
 ## Forced dependency changes
 
