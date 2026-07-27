@@ -22,12 +22,12 @@ aes = { version = "0.9.2", optional = true }
 cmac = { version = "0.8.0", optional = true }
 crypto-bigint = { version = "0.7", optional = true }
 elliptic-curve = { version = "0.14", features = ["arithmetic"], optional = true }
-p256 = { version = "0.14", optional = true }
-p384 = { version = "0.14", optional = true }
-p521 = { version = "0.14", optional = true }
+p256 = { version = "0.14", features = ["arithmetic"], optional = true }
+p384 = { version = "0.14", features = ["arithmetic"], optional = true }
+p521 = { version = "0.14", features = ["arithmetic"], optional = true }
 # Brainpool curves are only published as release candidates so far.
-bp256 = { version = "0.14.0-rc.15", optional = true }
-bp384 = { version = "0.14.0-rc.15", optional = true }
+bp256 = { version = "0.14.0-rc.15", features = ["arithmetic"], optional = true }
+bp384 = { version = "0.14.0-rc.15", features = ["arithmetic"], optional = true }
 iso7816-tlv = "0.4.4"
 clap = { version = "4.5", features = ["derive"], optional = true }
 pcsc = { version = "2.9.0", optional = true }
