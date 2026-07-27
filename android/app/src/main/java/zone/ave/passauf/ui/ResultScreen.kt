@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -43,10 +44,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -62,6 +65,8 @@ import zone.ave.passauf.FileReport
 import zone.ave.passauf.KeyKind
 import zone.ave.passauf.PassaufNative
 import zone.ave.passauf.Sharing
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -275,11 +280,7 @@ private fun IdentityCard(
  */
 @Composable
 private fun Portrait(paths: List<String>) {
-    val bitmap = remember(paths) {
-        paths.firstNotNullOfOrNull { path ->
-            runCatching { decodeImage(File(path)) }.getOrNull()
-        }
-    }
+    val bitmap = decodedImages(remember(paths) { paths.map(::File) }).firstOrNull()
 
     Box(
         modifier = Modifier
@@ -576,16 +577,27 @@ private fun FileCard(file: FileReport, filesOnDisk: Boolean) {
             Spacer(Modifier.height(12.dp))
             Text(hashStatusText(file), style = MaterialTheme.typography.bodySmall)
 
-            if (file.details.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
-                file.details.forEach { DetailRow(it.label, it.value, monospaceValue = true) }
-            }
-
             val dumped = if (!filesOnDisk) {
                 emptyList()
             } else {
                 file.dumped.map(::File).filter { it.exists() }
             }
+
+            // Whatever pictures this data group turned out to hold. DG2's face,
+            // DG5's printed portrait, DG7's signature; anything else that wrote
+            // an image out is shown the same way, without needing to be named
+            // here.
+            val images = remember(dumped) { dumped.filter { it.looksLikeImage() } }
+            if (images.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                ImageStrip(images)
+            }
+
+            if (file.details.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                file.details.forEach { DetailRow(it.label, it.value, monospaceValue = true) }
+            }
+
             if (dumped.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
                 dumped.forEach { saved ->
@@ -604,6 +616,73 @@ private fun FileCard(file: FileReport, filesOnDisk: Boolean) {
             }
         }
     }
+}
+
+/**
+ * The pictures a data group held, side by side and big enough to look at.
+ *
+ * Tapping one shares it, the same as tapping its filename below.
+ */
+@Composable
+private fun ImageStrip(files: List<File>) {
+    val context = LocalContext.current
+    val bitmaps = decodedImages(files)
+
+    if (bitmaps.isEmpty()) {
+        Text(
+            // Which is what a JPEG 2000 that even our own decoder choked on
+            // looks like. The file is still there to be exported.
+            "The image could not be decoded, but it was saved.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+
+    Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        bitmaps.forEachIndexed { index, bitmap ->
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = "Image ${index + 1} from this data group",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .height(220.dp)
+                    // Keep the document's own proportions: a face image is
+                    // portrait, a signature is a wide strip.
+                    .aspectRatio(bitmap.width.toFloat() / bitmap.height.toFloat())
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable {
+                        files.getOrNull(index)?.let { Sharing.shareFile(context, it) }
+                    },
+            )
+        }
+    }
+}
+
+/**
+ * Decode images off the main thread.
+ *
+ * A JPEG 2000 face image goes through a software decoder and takes long enough
+ * that doing it during composition would stall the frame. The result arrives
+ * when it arrives; until then the caller shows its own placeholder.
+ */
+@Composable
+private fun decodedImages(files: List<File>): List<Bitmap> {
+    val bitmaps by produceState(initialValue = emptyList(), files) {
+        value = withContext(Dispatchers.IO) {
+            files.mapNotNull { runCatching { decodeImage(it) }.getOrNull() }
+        }
+    }
+    return bitmaps
+}
+
+/** Whether a dumped file is worth handing to a decoder at all. */
+private fun File.looksLikeImage(): Boolean {
+    return extension.lowercase() in setOf("jpeg", "jpg", "jp2", "j2k", "png")
 }
 
 @Composable
