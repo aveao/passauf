@@ -244,6 +244,8 @@ data class FileReport(
     val expectedHash: String? = null,
     val actualHash: String? = null,
     val dumped: List<String> = emptyList(),
+    /** Of [dumped], the ones that are pictures the library pulled out. */
+    val images: List<String> = emptyList(),
     val details: List<Detail> = emptyList(),
 )
 

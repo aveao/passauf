@@ -87,6 +87,9 @@ class WireFormatTest {
         assertEquals("matches", file.hashStatus)
         assertEquals(93, file.size)
         assertEquals(listOf("/tmp/x-EF_DG1.bin"), file.dumped)
+        // Which of the dumped files are pictures comes from the library, not
+        // from guessing at extensions here.
+        assertEquals(emptyList(), file.images)
         assertEquals("MRZ", file.details.first().label)
 
         assertEquals(listOf("/tmp/x-EF_DG2-pic1.jpeg"), report.portraits)
@@ -118,7 +121,7 @@ class WireFormatTest {
              "document":{"surname":"MUSTERMANN","personalDetails":[],"documentDetails":[]},
              "files":[{"name":"EF.DG1","description":"Details recorded in MRZ","fileId":"0x0101",
                        "present":true,"size":93,"hashStatus":"matches",
-                       "dumped":["/tmp/x-EF_DG1.bin"],
+                       "dumped":["/tmp/x-EF_DG1.bin"],"images":[],
                        "details":[{"label":"MRZ","value":"P<UTO..."}]}],
              "portraits":["/tmp/x-EF_DG2-pic1.jpeg"],
              "warnings":[],

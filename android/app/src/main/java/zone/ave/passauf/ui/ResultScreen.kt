@@ -583,11 +583,17 @@ private fun FileCard(file: FileReport, filesOnDisk: Boolean) {
                 file.dumped.map(::File).filter { it.exists() }
             }
 
-            // Whatever pictures this data group turned out to hold. DG2's face,
-            // DG5's printed portrait, DG7's signature; anything else that wrote
-            // an image out is shown the same way, without needing to be named
-            // here.
-            val images = remember(dumped) { dumped.filter { it.looksLikeImage() } }
+            // Which of the dumped files are pictures is the library's call,
+            // not something to infer from a file extension here: a face image
+            // whose format the document failed to name is dumped as
+            // .image_bin, and guessing by extension hid it.
+            val images = remember(file, filesOnDisk) {
+                if (!filesOnDisk) {
+                    emptyList()
+                } else {
+                    file.images.map(::File).filter { it.exists() }
+                }
+            }
             if (images.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
                 ImageStrip(images)
@@ -680,10 +686,6 @@ private fun decodedImages(files: List<File>): List<Bitmap> {
     return bitmaps
 }
 
-/** Whether a dumped file is worth handing to a decoder at all. */
-private fun File.looksLikeImage(): Boolean {
-    return extension.lowercase() in setOf("jpeg", "jpg", "jp2", "j2k", "png")
-}
 
 @Composable
 private fun HashIcon(status: String) {
