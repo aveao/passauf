@@ -58,49 +58,18 @@ pub(crate) fn parse_biometric_info_template_group_template(
         let biometric_info_tlvs = helpers::sort_tlvs_by_tag(&tlv_value);
         // Here should be 0xA1 (header template), plus data: 0x5F2E (ISO/IEC 19794-5) or 0x7F2E (ISO/IEC 39794)
         let image_data: Vec<u8>;
-        let mut image_format: types::BiometricImageFormat = types::BiometricImageFormat::Reserved;
+        let image_format: types::BiometricImageFormat;
         if biometric_info_tlvs.contains_key(&0x5F2E) {
             let iso_19794_data =
                 helpers::get_tlv_value_bytes(biometric_info_tlvs.get(&0x5F2E).unwrap());
-            // quick lazy implementation of ISO/IEC 19794
-            // Only allow 2005 variant (this is what ICAO 9303 requires for first biometric)
-            if iso_19794_data[4..8] != [0x30, 0x31, 0x30, 00] {
-                warn!(
-                    "Biometric has unsupported version, skipping: {:02x?}",
-                    &iso_19794_data[4..8]
-                );
-                continue;
-            }
-
-            let number_of_representations =
-                u16::from_be_bytes(iso_19794_data[12..14].try_into().unwrap());
-            if number_of_representations != 1 {
-                warn!("Expected one representation of biometric, but found {}. We can only dump the first one.", number_of_representations)
-            }
-            let rep_1_start = 14; // size of general header on ISO/IEC 19794-1:2006
-            let rep_1_length = u32::from_be_bytes(
-                iso_19794_data[rep_1_start..rep_1_start + 4]
-                    .try_into()
-                    .unwrap(),
-            );
-            let rep_1_feature_point_count = u16::from_be_bytes(
-                iso_19794_data[rep_1_start + 4..rep_1_start + 6]
-                    .try_into()
-                    .unwrap(),
-            );
-            let rep_1_header_length: u16 = 20 + (8 * rep_1_feature_point_count) + 12;
-            let rep_1_data = &iso_19794_data
-                [rep_1_start + rep_1_header_length as usize..rep_1_start + rep_1_length as usize];
-            let rep_1_image_format = iso_19794_data[36 + (8 * rep_1_feature_point_count as usize)];
-
-            match types::BiometricImageFormat::from_repr(rep_1_image_format as usize) {
-                Some(format) => {
-                    image_format = format;
-                }
-                None => {}
-            }
-            // 36 + (8 * rep_1_feature_point_count)
-            image_data = rep_1_data.to_vec();
+            let (data, declared) = match parse_iso_19794_5(&iso_19794_data) {
+                Some(parsed) => parsed,
+                None => continue,
+            };
+            // What the record says and what the bytes are can disagree, and
+            // the bytes are what any decoder acts on.
+            image_format = resolve_image_format(declared, &data);
+            image_data = data;
         } else if biometric_info_tlvs.contains_key(&0x7F2E) {
             // ICAO 9303 requires ISO/IEC 19794 for first biometric so this is low-priority
             todo!();
@@ -128,6 +97,119 @@ pub(crate) fn parse_biometric_info_template_group_template(
         biometrics.push(biometric);
     }
     return biometrics;
+}
+
+/// Field sizes in an ISO/IEC 19794-5:2005 face record, in bytes.
+///
+/// The record is a Facial Record Header, then one representation per image.
+/// Each representation is a Facial Information block, then a Feature Point
+/// block per feature point, then an Image Information block, then the image.
+const FACIAL_RECORD_HEADER_LEN: usize = 14;
+const FACIAL_INFORMATION_LEN: usize = 20;
+const FEATURE_POINT_LEN: usize = 8;
+const IMAGE_INFORMATION_LEN: usize = 12;
+/// Where the image data type sits inside the Image Information block: after
+/// the face image type, and *before* the width. Reading one byte further
+/// along gives the high byte of the width instead, which for any image 512 or
+/// more pixels wide is not a format anyone has heard of.
+const IMAGE_DATA_TYPE_OFFSET: usize = 1;
+
+/// Pull the first image and its declared format out of a face record.
+///
+/// Only the 2005 variant of ISO/IEC 19794-5, which is what ICAO 9303 requires
+/// for the first biometric. Returns None for anything malformed: a data group
+/// read off a card that left the field mid-transfer is truncated, and this
+/// would otherwise index past the end of it.
+fn parse_iso_19794_5(data: &[u8]) -> Option<(Vec<u8>, Option<types::BiometricImageFormat>)> {
+    if data.len() < FACIAL_RECORD_HEADER_LEN {
+        warn!(
+            "Biometric is {} bytes, too short to hold a face record header.",
+            data.len()
+        );
+        return None;
+    }
+    if data[4..8] != [0x30, 0x31, 0x30, 0x00] {
+        warn!(
+            "Biometric has unsupported version, skipping: {:02x?}",
+            &data[4..8]
+        );
+        return None;
+    }
+
+    let number_of_representations = u16::from_be_bytes(data[12..14].try_into().ok()?);
+    if number_of_representations != 1 {
+        warn!(
+            "Expected one representation of biometric, but found {}. We can only dump the \
+             first one.",
+            number_of_representations
+        );
+    }
+
+    let representation = FACIAL_RECORD_HEADER_LEN;
+    if data.len() < representation + FACIAL_INFORMATION_LEN {
+        warn!("Biometric ends before its facial information block.");
+        return None;
+    }
+    let representation_len =
+        u32::from_be_bytes(data[representation..representation + 4].try_into().ok()?) as usize;
+    let feature_points = u16::from_be_bytes(
+        data[representation + 4..representation + 6]
+            .try_into()
+            .ok()?,
+    ) as usize;
+
+    let image_information =
+        representation + FACIAL_INFORMATION_LEN + (feature_points * FEATURE_POINT_LEN);
+    let image_start = image_information + IMAGE_INFORMATION_LEN;
+    let image_end = representation + representation_len;
+    if image_start > image_end || image_end > data.len() {
+        warn!(
+            "Biometric says its image runs to byte {}, but it is only {} bytes long.",
+            image_end,
+            data.len()
+        );
+        return None;
+    }
+
+    let declared = data
+        .get(image_information + IMAGE_DATA_TYPE_OFFSET)
+        .and_then(|byte| types::BiometricImageFormat::from_repr(*byte as usize));
+
+    return Some((data[image_start..image_end].to_vec(), declared));
+}
+
+/// Settle on an image's format from what the record declares and what the
+/// bytes actually are.
+///
+/// The bytes win. A face record states its format in one byte in the middle of
+/// a header, and getting that byte wrong names the dumped file something no
+/// viewer will open, whereas the leading bytes of a JPEG or JPEG 2000 are
+/// unambiguous and are what a decoder acts on regardless.
+fn resolve_image_format(
+    declared: Option<types::BiometricImageFormat>,
+    data: &[u8],
+) -> types::BiometricImageFormat {
+    let sniffed = if crate::images::looks_like_jpeg2000(data) {
+        Some(types::BiometricImageFormat::Jpeg2000)
+    } else if crate::images::looks_like_jpeg(data) {
+        Some(types::BiometricImageFormat::Jpeg)
+    } else {
+        None
+    };
+
+    return match (sniffed, declared) {
+        (Some(sniffed), Some(declared)) if sniffed != declared => {
+            debug!(
+                "Biometric declares itself {:?} but its bytes are {:?}. Going with the bytes.",
+                declared, sniffed
+            );
+            sniffed
+        }
+        (Some(sniffed), _) => sniffed,
+        // Not something we recognize, so the record's word is all there is.
+        (None, Some(declared)) => declared,
+        (None, None) => types::BiometricImageFormat::Reserved,
+    };
 }
 
 /// Remove the < characters at the end of the given string.
@@ -446,4 +528,116 @@ where
         pad_with_ellipses(title),
         value.clone().unwrap()
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build the ISO/IEC 19794-5:2005 face record around some image bytes.
+    ///
+    /// `width` matters: the byte after the image data type is the high half of
+    /// it, and reading that one instead is exactly the mistake this guards.
+    fn face_record(image: &[u8], declared_type: u8, width: u16, feature_points: u16) -> Vec<u8> {
+        let mut representation: Vec<u8> = vec![];
+        // Facial Information: length and feature point count, then fields we
+        // do not read.
+        representation.extend_from_slice(&[0u8; 4]); // length, filled in below
+        representation.extend_from_slice(&feature_points.to_be_bytes());
+        representation.extend_from_slice(&[0u8; 14]);
+        // One Feature Point block each.
+        representation.extend(std::iter::repeat(0u8).take(usize::from(feature_points) * 8));
+        // Image Information: face image type, image data type, width, height,
+        // then colour space, source, device and quality.
+        representation.push(0x01);
+        representation.push(declared_type);
+        representation.extend_from_slice(&width.to_be_bytes());
+        representation.extend_from_slice(&800u16.to_be_bytes());
+        representation.extend_from_slice(&[0u8; 6]);
+        representation.extend_from_slice(image);
+
+        let length = (representation.len() as u32).to_be_bytes();
+        representation[0..4].copy_from_slice(&length);
+
+        let mut record: Vec<u8> = b"FAC\0010\0".to_vec();
+        record.extend_from_slice(&((14 + representation.len()) as u32).to_be_bytes());
+        record.extend_from_slice(&1u16.to_be_bytes());
+        record.extend_from_slice(&representation);
+        return record;
+    }
+
+    const JP2: &[u8] = include_bytes!("../../tests/fixtures/gradient.jp2");
+
+    /// A face image 512 or more pixels wide put the high byte of the width
+    /// where the image data type belongs, so a perfectly ordinary JPEG 2000
+    /// portrait came out as "reserved" and was dumped as .image_bin.
+    #[test]
+    fn a_wide_image_does_not_confuse_the_format() {
+        // 622 pixels wide, as one real document is: the high byte is 0x02,
+        // which read as a format means "reserved".
+        let record = face_record(JP2, 0x01, 622, 0);
+        let (data, declared) = parse_iso_19794_5(&record).unwrap();
+
+        assert_eq!(declared, Some(types::BiometricImageFormat::Jpeg2000));
+        assert_eq!(data, JP2);
+        assert_eq!(
+            resolve_image_format(declared, &data),
+            types::BiometricImageFormat::Jpeg2000
+        );
+    }
+
+    /// Feature points shift everything after them along, so the offset has to
+    /// move with them.
+    #[test]
+    fn finds_the_format_past_the_feature_points() {
+        let record = face_record(JP2, 0x01, 622, 5);
+        let (data, declared) = parse_iso_19794_5(&record).unwrap();
+        assert_eq!(declared, Some(types::BiometricImageFormat::Jpeg2000));
+        assert_eq!(data, JP2);
+    }
+
+    /// When the record and the bytes disagree, the bytes decide: they are what
+    /// a decoder will act on, and the name the file gets has to match.
+    #[test]
+    fn the_bytes_outrank_the_declaration() {
+        // Declared JPEG, actually JPEG 2000.
+        assert_eq!(
+            resolve_image_format(Some(types::BiometricImageFormat::Jpeg), JP2),
+            types::BiometricImageFormat::Jpeg2000
+        );
+        // Declared reserved, actually a JPEG.
+        assert_eq!(
+            resolve_image_format(
+                Some(types::BiometricImageFormat::Reserved),
+                &[0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10]
+            ),
+            types::BiometricImageFormat::Jpeg
+        );
+        // Nothing recognizable, so the record's word is all there is.
+        assert_eq!(
+            resolve_image_format(Some(types::BiometricImageFormat::Jpeg), b"something else"),
+            types::BiometricImageFormat::Jpeg
+        );
+        assert_eq!(
+            resolve_image_format(None, b"something else"),
+            types::BiometricImageFormat::Reserved
+        );
+    }
+
+    /// A card pulled out of the field mid-read leaves a truncated data group,
+    /// which used to index off the end of the buffer.
+    #[test]
+    fn a_truncated_record_is_refused_rather_than_panicking() {
+        let record = face_record(JP2, 0x01, 622, 0);
+        for length in [0, 1, 8, 13, 14, 20, 34, 45, record.len() / 2] {
+            assert_eq!(parse_iso_19794_5(&record[..length]), None, "at {}", length);
+        }
+        // A record claiming more than it carries.
+        let mut lying = face_record(JP2, 0x01, 622, 0);
+        lying[14..18].copy_from_slice(&0xFFFF_u32.to_be_bytes());
+        assert_eq!(parse_iso_19794_5(&lying), None);
+        // Feature points that run past the end.
+        let overrun = face_record(JP2, 0x01, 622, 0xFFFF);
+        assert_eq!(parse_iso_19794_5(&overrun[..60]), None);
+    }
 }

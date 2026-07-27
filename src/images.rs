@@ -38,6 +38,14 @@ pub fn looks_like_jpeg2000(data: &[u8]) -> bool {
     return data.starts_with(&JP2_SIGNATURE_BOX) || data.starts_with(&CODESTREAM_START);
 }
 
+/// Whether this looks like a JPEG, by its leading bytes.
+///
+/// The Start of Image marker, then the first byte of whichever marker follows
+/// it (ISO/IEC 10918-1). The other thing DG2 is allowed to hold.
+pub fn looks_like_jpeg(data: &[u8]) -> bool {
+    return data.starts_with(&[0xFF, 0xD8, 0xFF]);
+}
+
 /// Decode a JPEG 2000 image, in either the JP2 or bare codestream form.
 ///
 /// Returns None for anything that does not decode, rather than propagating a

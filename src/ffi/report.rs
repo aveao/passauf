@@ -105,6 +105,9 @@ pub struct FileReport {
     pub actual_hash: Option<String>,
     /// Paths of everything written out for this file.
     pub dumped: Vec<String>,
+    /// Of those, the ones that are pictures pulled out of the file, so a
+    /// frontend can show them without having to work out which is which.
+    pub images: Vec<String>,
     /// What the parser made of it, as rows to display.
     pub details: Vec<Detail>,
 }
@@ -272,6 +275,12 @@ fn file(file: &FileRead) -> FileReport {
             .iter()
             .map(|path| path.to_string_lossy().into_owned())
             .collect(),
+        images: file
+            .dumped
+            .iter()
+            .filter(|path| is_extracted_image(path))
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect(),
         details: file.parsed.as_ref().map_or_else(Vec::new, details),
     };
 }
@@ -288,16 +297,26 @@ fn portraits(read: &DocumentRead) -> Vec<String> {
             Some(file) => file,
             None => continue,
         };
-        for path in file.dumped.iter() {
-            let is_image = path
-                .extension()
-                .map_or(false, |extension| extension != "bin");
-            if is_image {
-                portraits.push(path.to_string_lossy().into_owned());
-            }
+        for path in file.dumped.iter().filter(|path| is_extracted_image(path)) {
+            portraits.push(path.to_string_lossy().into_owned());
         }
     }
     return portraits;
+}
+
+/// Whether a dumped path is a picture pulled out of a file, rather than the
+/// file's own contents.
+///
+/// Every dumper writes the raw file as `.bin` and gives anything it extracted
+/// a name of its own, so that is the whole rule. It is stated here and nowhere
+/// else on purpose: the app used to decide this from a list of known
+/// extensions, and a face image whose format could not be named came out as
+/// `.image_bin`, which that list did not have, so a picture the decoder
+/// handles perfectly well was never shown.
+fn is_extracted_image(path: &std::path::Path) -> bool {
+    return path
+        .extension()
+        .map_or(false, |extension| extension != "bin");
 }
 
 /// Gather the printed details from the data groups that carry them.
@@ -684,6 +703,7 @@ mod tests {
                 expected_hash: None,
                 actual_hash: None,
                 dumped: vec!["/tmp/x-EF_DG1.bin".to_string()],
+                images: vec![],
                 details: vec![Detail::new("MRZ", "P<UTO...")],
             }],
             portraits: vec!["/tmp/x-EF_DG2-pic1.jpeg".to_string()],
@@ -707,6 +727,7 @@ mod tests {
             "\"fileId\"",
             "\"hashStatus\"",
             "\"dumped\"",
+            "\"images\"",
             "\"details\"",
             "\"portraits\"",
             "\"warnings\"",
@@ -717,6 +738,23 @@ mod tests {
         // Absent optionals are left out rather than sent as null.
         assert!(!json.contains("\"error\""));
         println!("{}", json);
+    }
+
+    /// A face image whose format the record failed to name is dumped as
+    /// .image_bin, and calling that "not an image" is what hid it from the app.
+    #[test]
+    fn an_unnamed_image_format_is_still_an_image() {
+        use std::path::Path;
+        assert!(is_extracted_image(Path::new("/tmp/x-EF_DG2-pic1.jp2")));
+        assert!(is_extracted_image(Path::new("/tmp/x-EF_DG2-pic1.jpeg")));
+        assert!(is_extracted_image(Path::new(
+            "/tmp/x-EF_DG2-pic1.image_bin"
+        )));
+        assert!(is_extracted_image(Path::new("/tmp/x-EF_DG12-front.jpeg")));
+        // The file's own contents are not one of its images.
+        assert!(!is_extracted_image(Path::new("/tmp/x-EF_DG2.bin")));
+        assert!(!is_extracted_image(Path::new("/tmp/x-EF_DG1.bin")));
+        assert!(!is_extracted_image(Path::new("/tmp/no-extension")));
     }
 
     /// The app shows dates as ISO and formats them itself, so a two-digit year
