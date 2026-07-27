@@ -1,8 +1,8 @@
 use cbc::cipher::{
-    inout::block_padding, inout::block_padding::RawPadding, BlockModeDecrypt, BlockModeEncrypt,
+    inout::block_padding, inout::block_padding::Padding, BlockModeDecrypt, BlockModeEncrypt,
     KeyInit, KeyIvInit,
 };
-use rand::Rng;
+use rand::RngExt;
 use retail_mac::{Mac, RetailMac};
 use sha1::{Digest, Sha1};
 use simplelog::{debug, info};
