@@ -3,8 +3,12 @@ use pcsc::{Context, Scope};
 #[cfg(feature = "proxmark")]
 use serialport::SerialPort;
 use simplelog::{debug, trace};
+// Only the PC/SC backend has failures worth an error!; the Proxmark one warns
+// and moves on to the next modulation.
+#[cfg(feature = "pcsc")]
+use simplelog::error;
 #[cfg(any(feature = "pcsc", feature = "proxmark"))]
-use simplelog::{error, info, warn};
+use simplelog::{info, warn};
 #[cfg(feature = "pcsc")]
 use std::ffi::CString;
 use std::{fmt, str::FromStr};
