@@ -18,6 +18,30 @@ const OID_PK_ECDH: [u8; 9] = [0x04, 0x00, 0x7F, 0x00, 0x07, 0x02, 0x02, 0x01, 0x
 /// id-PK-DH, `0.4.0.127.0.7.2.2.1.1`.
 const OID_PK_DH: [u8; 9] = [0x04, 0x00, 0x7F, 0x00, 0x07, 0x02, 0x02, 0x01, 0x01];
 
+/// Work out which curve a key sits on by testing the point against each one.
+///
+/// A chip that spells its curve out as explicit domain parameters names no
+/// parameter ID, so the point itself is the only thing left to go on. Two
+/// curves of the same size could in principle both accept a point, so this is
+/// a good guess rather than a guarantee.
+#[cfg(feature = "pace")]
+fn identify_curve(public_key: &[u8]) -> Option<crate::pace::domain::EcCurve> {
+    use crate::pace::domain::EcCurve;
+
+    for curve in [
+        EcCurve::NistP256,
+        EcCurve::BrainpoolP256r1,
+        EcCurve::NistP384,
+        EcCurve::BrainpoolP384r1,
+        EcCurve::NistP521,
+    ] {
+        if crate::pace::ecdh::ops_for(curve).is_some_and(|ops| ops.validate_point(public_key)) {
+            return Some(curve);
+        }
+    }
+    return None;
+}
+
 impl types::EFDG14 {
     #[cfg(feature = "cli")]
     pub fn fancy_print(&self, data_group: &types::DataGroup) {
@@ -29,7 +53,12 @@ impl types::EFDG14 {
                     Some(parameter) => format!("{}", parameter),
                     None => format!("domain parameter {}", parameter_id),
                 },
-                None => "explicit domain parameters".to_string(),
+                // Naming the curve is far more use than saying the chip didn't
+                // name it, so identify it from the key.
+                None => match identify_curve(&key_info.public_key) {
+                    Some(curve) => format!("{} by explicit domain parameters", curve),
+                    None => "explicit domain parameters, unrecognized curve".to_string(),
+                },
             };
             // The key ID only matters when the chip holds more than one key.
             let key_id = match key_info.key_id {
@@ -37,11 +66,11 @@ impl types::EFDG14 {
                 None => String::new(),
             };
             info!(
-                "{:>pad_len$} <yellow>{} ({} bytes{})</>",
+                "{:>pad_len$} <yellow>{}{} ({} bytes)</>",
                 "CA public key",
                 parameters,
-                key_info.public_key.len(),
                 key_id,
+                key_info.public_key.len(),
                 pad_len = 15
             );
         }
@@ -314,6 +343,37 @@ mod tests {
         let ops =
             crate::pace::ecdh::ops_for(crate::pace::domain::EcCurve::BrainpoolP256r1).unwrap();
         assert!(ops.validate_point(&key.public_key));
+    }
+
+    /// The curve is identified from the key when the chip names no parameter
+    /// ID. This is the key off a real Reiseausweis für Ausländer, which uses
+    /// explicit domain parameters.
+    #[test]
+    fn identifies_the_curve_of_a_real_key() {
+        let public_key = point(
+            "66AEE03B01264B94FD48AE5155F7159FC9D80BA512DE7E3350A0582D07B1C138",
+            "575312399D0C86A16B7AA7FAB00C42118E1DE4055F1385DBBE2D1F246A6CFAF2",
+        );
+        assert_eq!(
+            identify_curve(&public_key),
+            Some(crate::pace::domain::EcCurve::BrainpoolP256r1)
+        );
+
+        // Appendix I's key, on the same curve.
+        assert_eq!(
+            identify_curve(&point(
+                "1872709494399E7470A6431BE25E83EEE24FEA568C2ED28DB48E05DB3A610DC8",
+                "84D256A40E35EFCB59BF6753D3A489D28C7A4D973C2DA138A6E7A4A08F68E16F",
+            )),
+            Some(crate::pace::domain::EcCurve::BrainpoolP256r1)
+        );
+
+        // Something that is on no curve we know.
+        let mut off_curve = public_key.clone();
+        let last = off_curve.len() - 1;
+        off_curve[last] ^= 0x01;
+        assert_eq!(identify_curve(&off_curve), None);
+        assert_eq!(identify_curve(&[]), None);
     }
 
     /// A DG14 with only unrelated SecurityInfos yields no keys rather than
