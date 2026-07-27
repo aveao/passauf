@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::iso7816;
+use crate::secure_messaging::SecureMessaging;
 use crate::smartcard_abstractions::Smartcard;
 use crate::types;
 use crate::types::ParsedDataGroup;
@@ -128,10 +129,7 @@ pub fn read_file(
         &dg_info,
         filename_distinguisher,
         base_dump_path,
-        false,
-        &mut 0,
-        &vec![],
-        &vec![],
+        None,
     );
 }
 
@@ -143,10 +141,7 @@ pub fn secure_read_file_by_name<'a>(
     file: types::DataGroupEnum,
     filename_distinguisher: &String,
     base_dump_path: &Option<PathBuf>,
-    secure_comms: bool,
-    ssc: &mut u64,
-    ks_enc: &Vec<u8>,
-    ks_mac: &Vec<u8>,
+    sm: Option<&mut SecureMessaging>,
 ) -> (
     &'a types::DataGroup,
     Option<Vec<u8>>,
@@ -158,10 +153,7 @@ pub fn secure_read_file_by_name<'a>(
         &dg_info,
         filename_distinguisher,
         base_dump_path,
-        secure_comms,
-        ssc,
-        ks_enc,
-        ks_mac,
+        sm,
     );
     return (dg_info, file_read, parsed_data);
 }
@@ -174,13 +166,9 @@ pub fn secure_read_file(
     dg_info: &types::DataGroup,
     filename_distinguisher: &String,
     base_dump_path: &Option<PathBuf>,
-    secure_comms: bool,
-    ssc: &mut u64,
-    ks_enc: &Vec<u8>,
-    ks_mac: &Vec<u8>,
+    sm: Option<&mut SecureMessaging>,
 ) -> (Option<Vec<u8>>, Option<ParsedDataGroup>) {
-    let file_read =
-        iso7816::select_and_read_file(smartcard, dg_info, secure_comms, ssc, ks_enc, ks_mac);
+    let file_read = iso7816::select_and_read_file(smartcard, dg_info, sm);
     let mut parsed_data: Option<ParsedDataGroup> = None;
     match file_read {
         Some(ref file_data) => {

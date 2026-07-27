@@ -131,8 +131,10 @@ fn main() {
     if args.card_access_number.is_some() {
         panic!("PACE/CAN isn't implemented, cannot proceed with authentication.");
     }
-    let (ks_enc, ks_mac, mut ssc) = icao9303::do_authentication(
-        pace_available,
+    if pace_available {
+        info!("PACE is available on this document, but it's not implemented by passauf yet.");
+    }
+    let mut sm = icao9303::do_bac_authentication(
         &mut smartcard,
         &args.document_number.as_ref().unwrap(),
         &args.date_of_birth.unwrap(),
@@ -145,10 +147,7 @@ fn main() {
         DataGroupEnum::EFCom,
         &filename_distinguisher,
         &args.dump_path,
-        true,
-        &mut ssc,
-        &ks_enc,
-        &ks_mac,
+        Some(&mut sm),
     );
     let parsed_ef_com = parse_result.unwrap();
     let ef_com_file: types::EFCom = match parsed_ef_com {
@@ -174,10 +173,7 @@ fn main() {
             dg_info,
             &filename_distinguisher,
             &args.dump_path,
-            true,
-            &mut ssc,
-            &ks_enc,
-            &ks_mac,
+            Some(&mut sm),
         );
     }
 

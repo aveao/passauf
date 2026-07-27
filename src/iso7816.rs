@@ -6,7 +6,7 @@ use std::cmp::min;
 use strum::{FromRepr, IntoStaticStr};
 
 use crate::helpers;
-use crate::icao9303;
+use crate::secure_messaging::{padding_method_2_unpad, SecureMessaging};
 use crate::smartcard_abstractions::Smartcard;
 use crate::types;
 
@@ -108,14 +108,17 @@ impl ApduCommand {
     }
 
     /// Serialize the APDU to a byte stream (as a secure APDU)
-    pub fn bac_secure_serialize(
-        &self,
-        ssc: &mut u64,
-        ks_enc: &Vec<u8>,
-        ks_mac: &Vec<u8>,
-    ) -> Vec<u8> {
+    pub fn secure_serialize(&self, sm: &mut SecureMessaging) -> Vec<u8> {
         // Command APDU: [DO‘85’ or DO‘87’] [DO‘97’] DO‘8E’.
         // Relevant for BER-TLV: ISO 7816-4-2020+A1-2023: 10.2.3, Table 50 and surroundings
+
+        // ICAO 9303 p11 9.8.2: "The SSC SHALL be increased every time before a
+        // command or response APDU is generated". This has to happen up front
+        // rather than just before the MAC, because AES derives its CBC IV from
+        // the counter, so encrypting first would use a stale IV. 3DES doesn't
+        // notice either way, its IV is always zero.
+        sm.bump_ssc();
+        debug!("post-bump ssc: {:02x?}", sm.ssc());
 
         // ICAO 9303 p11: "The command header MUST be included in the MAC calculation,
         // therefore the class byte CLA = 0x0C MUST be used."
@@ -126,14 +129,14 @@ impl ApduCommand {
         // Le: length of expected response
         let base_le = Self::get_field_len_vec(self.max_resp_len);
         let cmd = vec![cla, self.ins, self.p1, self.p2];
-        let padded_cmd = icao9303::padding_method_2_pad(&cmd);
+        let padded_cmd = sm.pad(&cmd);
         debug!("padded_cmd: {:02x?}", padded_cmd);
 
         // Padded Command + Data as BER-TLV (if set) + Padded Response Length as BER-TLV (if set) + MAC
         let mut secure_data: Vec<u8> = vec![];
 
         if !self.data.is_empty() {
-            let padded_data = icao9303::padding_method_2_pad(&self.data);
+            let padded_data = sm.pad(&self.data);
             debug!("padded_data: {:02x?}", padded_data);
 
             // ICAO 9303 p11: "In case INS is even, DO‘87’ SHALL be used, and in case INS is odd, DO‘85’ SHALL be used."
@@ -146,7 +149,7 @@ impl ApduCommand {
 
             // If instruction is an even number
             if self.ins % 2 == 0 {
-                let encrypted_data = icao9303::tdes_enc(ks_enc, &padded_data);
+                let encrypted_data = sm.encrypt(&padded_data);
                 debug!("encrypted_data: {:02x?}", encrypted_data);
                 // Tag is 0x87, "Padding-content indicator byte followed by cryptogram".
                 let tag = ber::Tag::try_from(0x87).unwrap();
@@ -174,23 +177,14 @@ impl ApduCommand {
             secure_data.extend_from_slice(&do_97_tlv.to_vec());
         }
 
-        *ssc += 1;
-        debug!("post-bump ssc: {:02x?}", ssc);
-
         // Pad secure data so far with Padding Method 2
         debug!("unpadded secure_data: {:02x?}", secure_data);
-        let padded_secure_data = icao9303::padding_method_2_pad(
-            &vec![
-                ssc.to_be_bytes().as_slice(),
-                padded_cmd.as_slice(),
-                secure_data.as_slice(),
-            ]
-            .concat(),
-        );
+        let padded_secure_data =
+            sm.pad(&vec![sm.ssc(), padded_cmd.as_slice(), secure_data.as_slice()].concat());
         debug!("padded secure_data: {:02x?}", padded_secure_data);
 
         // Calculate the MAC for the secure data so far
-        let secure_data_mac = icao9303::retail_mac(ks_mac, &padded_secure_data);
+        let secure_data_mac = sm.mac(&padded_secure_data);
         debug!("secure_data_mac: {:02x?}", secure_data_mac);
 
         // Tag is 0x97, "One or two bytes encoding Le in the unsecured C-RP (possibly empty, see 10.5)"
@@ -220,47 +214,46 @@ impl ApduCommand {
         smartcard: &mut Box<impl Smartcard + ?Sized>,
         assert_on_status: bool,
     ) -> (Vec<u8>, u16) {
-        let (rapdu, status_code) =
-            self.secure_exchange(smartcard, assert_on_status, false, &mut 0, &vec![], &vec![]);
+        let (rapdu, status_code) = self.secure_exchange(smartcard, assert_on_status, None);
         return (rapdu, status_code);
     }
 
-    /// Send APDU to the given smartcard using secure communications
+    /// Send APDU to the given smartcard, using secure communications if a
+    /// session is supplied
     ///
     /// Returns (RAPDU, status code)
     pub fn secure_exchange(
         &mut self,
         smartcard: &mut Box<impl Smartcard + ?Sized>,
         assert_on_status: bool,
-        secure_comms: bool,
-        ssc: &mut u64,
-        ks_enc: &Vec<u8>,
-        ks_mac: &Vec<u8>,
+        mut sm: Option<&mut SecureMessaging>,
     ) -> (Vec<u8>, u16) {
         let mut done_exchanging = false;
         let mut rapdu_data: Vec<u8> = vec![];
         let mut status_code_bytes: Vec<u8> = vec![];
         while !done_exchanging {
-            debug!("> APDU (secure: {:?}): {:x?}", secure_comms, self);
-            let apdu_bytes = if secure_comms {
-                self.bac_secure_serialize(ssc, ks_enc, ks_mac)
-            } else {
-                self.serialize()
+            debug!("> APDU (secure: {:?}): {:x?}", sm.is_some(), self);
+            let apdu_bytes = match sm {
+                Some(ref mut sm) => self.secure_serialize(sm),
+                None => self.serialize(),
             };
 
             rapdu_data = smartcard.exchange_apdu(&apdu_bytes).unwrap();
             status_code_bytes = get_status_code_bytes(&rapdu_data);
 
             // - 2 bytes for status code
-            if secure_comms {
-                match parse_secure_rapdu(&rapdu_data[..rapdu_data.len() - 2], ssc, ks_enc, ks_mac) {
-                    Some(data) => {
-                        rapdu_data = data;
-                    }
-                    None => {}
-                };
-            } else {
-                rapdu_data = rapdu_data[..rapdu_data.len() - 2].to_vec();
+            match sm {
+                Some(ref mut sm) => {
+                    match parse_secure_rapdu(&rapdu_data[..rapdu_data.len() - 2], sm) {
+                        Some(data) => {
+                            rapdu_data = data;
+                        }
+                        None => {}
+                    };
+                }
+                None => {
+                    rapdu_data = rapdu_data[..rapdu_data.len() - 2].to_vec();
+                }
             }
 
             // ISO/IEC 7816-4 says:
@@ -294,15 +287,11 @@ impl ApduCommand {
 pub fn select_and_read_file(
     smartcard: &mut Box<impl Smartcard + ?Sized>,
     dg_info: &types::DataGroup,
-    secure_comms: bool,
-    ssc: &mut u64,
-    ks_enc: &Vec<u8>,
-    ks_mac: &Vec<u8>,
+    mut sm: Option<&mut SecureMessaging>,
 ) -> Option<Vec<u8>> {
     info!("<d>Selecting {} ({})</>", dg_info.name, dg_info.description);
     let mut apdu = apdu_select_file_by_ef(dg_info.file_id);
-    let (_, status_code) =
-        apdu.secure_exchange(smartcard, false, secure_comms, ssc, ks_enc, ks_mac);
+    let (_, status_code) = apdu.secure_exchange(smartcard, false, sm.as_deref_mut());
 
     if status_code != StatusCode::Ok as u16 {
         warn!("{} not found (this is probably fine).", dg_info.name);
@@ -315,8 +304,7 @@ pub fn select_and_read_file(
     let mut file_len: u16 = 0;
     while bytes_to_read > 0 {
         let mut apdu = apdu_read_binary(total_data.len() as u16, bytes_to_read);
-        let (apdu_data, status_code) =
-            apdu.secure_exchange(smartcard, false, secure_comms, ssc, ks_enc, ks_mac);
+        let (apdu_data, status_code) = apdu.secure_exchange(smartcard, false, sm.as_deref_mut());
         let status_code_bytes = status_code.to_be_bytes();
 
         // Unfortunately, ICAO 9303 does not allow us to read file sizes.
@@ -379,16 +367,11 @@ pub fn select_and_read_file(
 ///
 /// Currently supports DO'99', '87' and '8E'
 /// Returns the decrypted data from DO'87'
-pub fn parse_secure_rapdu(
-    rapdu: &[u8],
-    ssc: &mut u64,
-    ks_enc: &Vec<u8>,
-    ks_mac: &Vec<u8>,
-) -> Option<Vec<u8>> {
+pub fn parse_secure_rapdu(rapdu: &[u8], sm: &mut SecureMessaging) -> Option<Vec<u8>> {
     const SIGNATURE_CHECK_CONCAT_ORDER: [u16; 2] = [0x87, 0x99];
     // Increment SSC when we receive a secure RAPDU
-    *ssc += 1;
-    debug!("post-bump ssc: {:02x?}", ssc);
+    sm.bump_ssc();
+    debug!("post-bump ssc: {:02x?}", sm.ssc());
     let parsed_rapdu = ber::Tlv::parse_all(rapdu);
     debug!("parsed_rapdu: {:02x?}", parsed_rapdu);
 
@@ -400,7 +383,7 @@ pub fn parse_secure_rapdu(
     }
 
     // Concat SSC + [DO'87'] + DO'99' + padding, to compare against DO'8E'
-    let mut signature_check_data: Vec<u8> = ssc.to_be_bytes().to_vec();
+    let mut signature_check_data: Vec<u8> = sm.ssc().to_vec();
     for tlv_tag_id in SIGNATURE_CHECK_CONCAT_ORDER {
         match rapdu_tlvs.get(&tlv_tag_id) {
             Some(tlv) => {
@@ -409,11 +392,11 @@ pub fn parse_secure_rapdu(
             None => {}
         }
     }
-    signature_check_data = icao9303::padding_method_2_pad(&signature_check_data);
+    signature_check_data = sm.pad(&signature_check_data);
     debug!("signature_check_data: {:02x?}", signature_check_data);
 
     // Calculate the MAC for the data we received
-    let signature_check_mac = icao9303::retail_mac(ks_mac, &signature_check_data);
+    let signature_check_mac = sm.mac(&signature_check_data);
     debug!("signature_check_mac: {:02x?}", signature_check_mac);
 
     // Extract the value of DO'8E' and compare to the MAC we calculated.
@@ -432,9 +415,9 @@ pub fn parse_secure_rapdu(
         assert!(do_87_value[0] == 0x01);
         do_87_value = do_87_value[1..].to_vec();
         debug!("do_87_value: {:02x?}", do_87_value);
-        let decrypted_data = icao9303::tdes_dec(ks_enc, &do_87_value);
+        let decrypted_data = sm.decrypt(&do_87_value);
         debug!("decrypted_data: {:02x?}", decrypted_data);
-        let decrypted_unpadded_data = icao9303::padding_method_2_unpad(&decrypted_data);
+        let decrypted_unpadded_data = padding_method_2_unpad(&decrypted_data);
         debug!("decrypted_unpadded_data: {:02x?}", decrypted_unpadded_data);
         return Some(decrypted_unpadded_data);
     }

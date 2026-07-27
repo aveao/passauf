@@ -1,15 +1,13 @@
-use cbc::cipher::{
-    inout::block_padding, inout::block_padding::Padding, BlockModeDecrypt, BlockModeEncrypt,
-    KeyInit, KeyIvInit,
-};
+use cbc::cipher::{inout::block_padding, BlockModeDecrypt, BlockModeEncrypt, KeyIvInit};
 use rand::RngExt;
-use retail_mac::{Mac, RetailMac};
 use sha1::{Digest, Sha1};
 use simplelog::{debug, info};
 
+use crate::secure_messaging::{
+    kdf, padding_method_2_pad, retail_mac, SecureMessaging, SmAlgorithm,
+};
 use crate::{iso7816, smartcard_abstractions::Smartcard};
 
-type RetailMacDes = RetailMac<des::Des>;
 type TDesCbcEnc = cbc::Encryptor<des::TdesEde2>;
 type TDesCbcDec = cbc::Decryptor<des::TdesEde2>;
 
@@ -51,50 +49,6 @@ pub fn append_check_digit(text: &String) -> String {
     let check_digit = calculate_check_digit(text);
     let result = text.to_owned() + &check_digit.to_string();
     return result;
-}
-
-/// Does key derivation based on ICAO 9303 p11 for SHA-1
-///
-/// For BAC, this is always used.
-/// For PACE, this is only used for 128-bit AES keys.
-pub fn kdf_sha1(shared_secret: &[u8], counter: u32) -> Vec<u8> {
-    let base_secret = vec![shared_secret, &counter.to_be_bytes()].concat();
-    let mut sha1_hasher = Sha1::new();
-    sha1_hasher.update(base_secret.as_slice());
-    // Trim to first 16 bytes.
-    let keydata = &sha1_hasher.finalize_reset()[0..16];
-    // We can optionally adjust parity bits here, but rustcrypto/des doesn't care.
-    return keydata.to_vec();
-}
-
-/// Applies Padding Method 2 based on ISO 9797-1.
-///
-/// Takes the data and returns a new Vec with the appropriate padding.
-pub fn padding_method_2_pad(input: &Vec<u8>) -> Vec<u8> {
-    // block_padding::Iso7816 is pretty close to this, but it has one key difference:
-    // This function adds a full block of padding when data is block size-aligned.
-    // block_padding::Iso7816, however, does not. IME, this can make or break the comms.
-
-    let padding = [0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
-    // This assumes a block size of 8 bytes.
-    let padding_to_append = 8 - (input.len() % 8);
-    return vec![input.as_slice(), &padding[0..padding_to_append]].concat();
-}
-
-/// Undoes Padding Method 2 based on ISO 9797-1.
-///
-/// Takes the data and returns a new Vec without the padding.
-pub fn padding_method_2_unpad(input: &Vec<u8>) -> Vec<u8> {
-    return block_padding::Iso7816::raw_unpad(input).unwrap().to_vec();
-}
-
-/// Applies Retail Mac based on ISO 9797-1.
-///
-/// Does not apply padding method 2, it should be done separately.
-pub fn retail_mac(k_mac: &[u8], input_data: &Vec<u8>) -> Vec<u8> {
-    let mut rmac_instance = RetailMacDes::new_from_slice(k_mac).unwrap();
-    rmac_instance.update(input_data);
-    return rmac_instance.finalize().as_bytes().to_vec();
 }
 
 /// Encrypts given data according to 3DES as used in ICAO 9303
@@ -155,8 +109,8 @@ pub fn calculate_bac_eifd_and_mifd(
     let k_seed = &sha1_hasher.finalize_reset()[0..16];
 
     // Derive keys K.enc and K.mac
-    let k_enc = kdf_sha1(k_seed, 1);
-    let k_mac = kdf_sha1(k_seed, 2);
+    let k_enc = kdf(SmAlgorithm::Tdes, k_seed, 1);
+    let k_mac = kdf(SmAlgorithm::Tdes, k_seed, 2);
     debug!("K.enc: {:02x?}", k_enc);
     debug!("K.mac: {:02x?}", k_mac);
 
@@ -166,7 +120,7 @@ pub fn calculate_bac_eifd_and_mifd(
 
     // Calculate M.IFD = MAC(K.MAC, E.IFD)
     // Here we use Retail Mac (ISO 9797-1 MAC format 3) with Padding Method 2
-    let m_ifd = retail_mac(&k_mac, &padding_method_2_pad(&e_ifd));
+    let m_ifd = retail_mac(&k_mac, &padding_method_2_pad(&e_ifd, 8));
     debug!("M.ifd: {:02x?}", m_ifd);
 
     return (k_enc, e_ifd, m_ifd);
@@ -197,8 +151,8 @@ pub fn calculate_bac_session_keys(
     debug!("K.seed: {:x?}", k_seed);
 
     // Calculate session keys (KS.enc, KS.mac)
-    let ks_enc = kdf_sha1(&k_seed, 1);
-    let ks_mac = kdf_sha1(&k_seed, 2);
+    let ks_enc = kdf(SmAlgorithm::Tdes, &k_seed, 1);
+    let ks_mac = kdf(SmAlgorithm::Tdes, &k_seed, 2);
     debug!("KS.enc: {:x?}", ks_enc);
     debug!("KS.mac: {:x?}", ks_mac);
     return (ks_enc, ks_mac);
@@ -216,7 +170,7 @@ pub fn do_bac_authentication(
     document_number: &String,
     date_of_birth: &String,
     date_of_expiry: &String,
-) -> (Vec<u8>, Vec<u8>, u64) {
+) -> SecureMessaging {
     info!("<d>Starting Basic Access Control</>");
 
     // Get RND.IC by calling GET_CHALLENGE.
@@ -261,21 +215,6 @@ pub fn do_bac_authentication(
     // Calculate session counter
     let ssc = calculate_initial_ssc_bac(rnd_ic, &rnd_ifd);
 
-    return (ks_enc, ks_mac, ssc);
-}
-
-pub fn do_authentication(
-    pace_available: bool,
-    smartcard: &mut Box<impl Smartcard + ?Sized>,
-    document_number: &String,
-    date_of_birth: &String,
-    date_of_expiry: &String,
-) -> (Vec<u8>, Vec<u8>, u64) {
-    // TODO: check if reading things without auth is possible, GH#7
-    // TODO: make the return type of this an AuthState object,
-    // have it state if we need secure comms and what arguments are relevant
-    if pace_available {
-        info!("PACE is available on this document, but it's not implemented by passauf yet.");
-    }
-    return do_bac_authentication(smartcard, document_number, date_of_birth, date_of_expiry);
+    // Unlike PACE, BAC's counter doesn't start at zero.
+    return SecureMessaging::new_bac(ks_enc, ks_mac, ssc);
 }

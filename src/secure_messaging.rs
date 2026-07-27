@@ -215,15 +215,21 @@ impl SecureMessaging {
             SmAlgorithm::Tdes => TDesCbcEnc::new_from_slices(&self.ks_enc, &iv)
                 .unwrap()
                 .encrypt_padded_vec::<block_padding::NoPadding>(data),
-            SmAlgorithm::Aes128 => cbc::Encryptor::<aes::Aes128>::new_from_slices(&self.ks_enc, &iv)
-                .unwrap()
-                .encrypt_padded_vec::<block_padding::NoPadding>(data),
-            SmAlgorithm::Aes192 => cbc::Encryptor::<aes::Aes192>::new_from_slices(&self.ks_enc, &iv)
-                .unwrap()
-                .encrypt_padded_vec::<block_padding::NoPadding>(data),
-            SmAlgorithm::Aes256 => cbc::Encryptor::<aes::Aes256>::new_from_slices(&self.ks_enc, &iv)
-                .unwrap()
-                .encrypt_padded_vec::<block_padding::NoPadding>(data),
+            SmAlgorithm::Aes128 => {
+                cbc::Encryptor::<aes::Aes128>::new_from_slices(&self.ks_enc, &iv)
+                    .unwrap()
+                    .encrypt_padded_vec::<block_padding::NoPadding>(data)
+            }
+            SmAlgorithm::Aes192 => {
+                cbc::Encryptor::<aes::Aes192>::new_from_slices(&self.ks_enc, &iv)
+                    .unwrap()
+                    .encrypt_padded_vec::<block_padding::NoPadding>(data)
+            }
+            SmAlgorithm::Aes256 => {
+                cbc::Encryptor::<aes::Aes256>::new_from_slices(&self.ks_enc, &iv)
+                    .unwrap()
+                    .encrypt_padded_vec::<block_padding::NoPadding>(data)
+            }
         };
     }
 
@@ -235,18 +241,24 @@ impl SecureMessaging {
                 .unwrap()
                 .decrypt_padded_vec::<block_padding::NoPadding>(data)
                 .unwrap(),
-            SmAlgorithm::Aes128 => cbc::Decryptor::<aes::Aes128>::new_from_slices(&self.ks_enc, &iv)
-                .unwrap()
-                .decrypt_padded_vec::<block_padding::NoPadding>(data)
-                .unwrap(),
-            SmAlgorithm::Aes192 => cbc::Decryptor::<aes::Aes192>::new_from_slices(&self.ks_enc, &iv)
-                .unwrap()
-                .decrypt_padded_vec::<block_padding::NoPadding>(data)
-                .unwrap(),
-            SmAlgorithm::Aes256 => cbc::Decryptor::<aes::Aes256>::new_from_slices(&self.ks_enc, &iv)
-                .unwrap()
-                .decrypt_padded_vec::<block_padding::NoPadding>(data)
-                .unwrap(),
+            SmAlgorithm::Aes128 => {
+                cbc::Decryptor::<aes::Aes128>::new_from_slices(&self.ks_enc, &iv)
+                    .unwrap()
+                    .decrypt_padded_vec::<block_padding::NoPadding>(data)
+                    .unwrap()
+            }
+            SmAlgorithm::Aes192 => {
+                cbc::Decryptor::<aes::Aes192>::new_from_slices(&self.ks_enc, &iv)
+                    .unwrap()
+                    .decrypt_padded_vec::<block_padding::NoPadding>(data)
+                    .unwrap()
+            }
+            SmAlgorithm::Aes256 => {
+                cbc::Decryptor::<aes::Aes256>::new_from_slices(&self.ks_enc, &iv)
+                    .unwrap()
+                    .decrypt_padded_vec::<block_padding::NoPadding>(data)
+                    .unwrap()
+            }
         };
     }
 
@@ -488,7 +500,13 @@ mod tests {
         );
 
         let aes = SecureMessaging::new(SmAlgorithm::Aes128, vec![0x11u8; 16], vec![0x22u8; 16]);
-        assert_eq!(aes.mac_with_internal_padding(b"passauf"), aes.mac(b"passauf"));
-        assert_ne!(aes.mac_with_internal_padding(b"passauf"), aes.mac(&aes.pad(b"passauf")));
+        assert_eq!(
+            aes.mac_with_internal_padding(b"passauf"),
+            aes.mac(b"passauf")
+        );
+        assert_ne!(
+            aes.mac_with_internal_padding(b"passauf"),
+            aes.mac(&aes.pad(b"passauf"))
+        );
     }
 }
