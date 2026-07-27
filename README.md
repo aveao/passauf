@@ -132,13 +132,23 @@ PACE-CAM proves the chip holds the private key belonging to the Chip Authenticat
 
 EF.CardSecurity needs PACE and lives at the master file, so PACE runs **before** the LDS1 applet is selected — the order ICAO 9303 part 11 Appendix J gives anyway — and the applet is then selected over secure messaging. BAC still selects the applet first, since it authenticates against it. EF.CardSecurity is a CMS `SignedData`; its `SecurityInfos` are reached through the eContent, and **its signature is not verified**, which again is Passive Authentication's job.
 
-**A CAM pass is not proof the document is genuine.** It only proves the chip holds the private key for the key *it gave us*. Nothing yet establishes that key belongs to a real issuing authority — that is Passive Authentication's job, and ICAO 9303 part 11 section 4.4.3.5.2 requires PA alongside CAM for exactly this reason. passauf does not validate `EF.SOD` yet, so treat a pass as "this chip is not a naive clone" rather than "this document is real".
+**A CAM pass is not proof the document is genuine.** It only proves the chip holds the private key for the key *it gave us*. Nothing yet establishes that key belongs to a real issuing authority — that is Passive Authentication's job, and ICAO 9303 part 11 section 4.4.3.5.2 requires PA alongside CAM for exactly this reason. `EF.SOD`'s hashes are checked (see below) but its signature is not, so treat a pass as "this chip is not a naive clone" rather than "this document is real".
 
 ### Also not implemented
 
 - Explicit (non-standardized) domain parameters carried in a `PACEDomainParameterInfo`. Documents that use these are rejected with an explanation rather than guessed at.
-- Passive Authentication, i.e. validating `EF.SOD` and the certificate chain behind it. Without it, PACE-CAM's guarantee is limited as described above.
+- The trust half of Passive Authentication: verifying `EF.SOD`'s signature and building a certificate path to a Country Signing CA. See below for what *is* done.
 - Terminal Authentication, and with it the `0x7F4C` Certificate Holder Authorization Template in MSE:Set AT. This is what would be needed to read EAC-protected data groups such as DG3 (fingerprints).
+
+### Data group hashes (half of Passive Authentication)
+
+`EF.SOD`, the Document Security Object, records a hash of every data group and is signed by the issuing country. passauf reads it, parses the `LDSSecurityObject` out of its CMS eContent, and checks each data group it read against the hash recorded for it. The hash algorithm is taken from the document rather than assumed; one we cannot compute is refused rather than guessed at.
+
+It also reports data groups that `EF.SOD` covers but `EF.COM` omits. `EF.COM` is the file list the read loop follows, and it is *not* covered by `EF.SOD`'s signature — so an entry removed from it cannot be detected by that signature, and is worth flagging.
+
+**This is only half of Passive Authentication.** `EF.SOD`'s own signature is not verified and no certificate path is built, so what a pass shows is that the data groups match what `EF.SOD` says they should be — internal consistency. It does not show that `EF.SOD` came from a real issuing authority: anyone able to re-sign the whole document produces a set that agrees with itself perfectly.
+
+Closing that gap means verifying `EF.SOD`'s CMS signature against the Document Signer certificate it embeds, then building a path from that certificate to a Country Signing CA certificate held as a trust anchor. Part 12 is explicit that CSCA certificates arrive **out of band** — the ICAO PKD, national Master Lists, or bilateral exchange — so the hard part is distribution rather than cryptography. Until then the tool reports what it actually established, and says so on every run.
 
 ### Testing
 

@@ -31,8 +31,9 @@ Out of scope:
   ID 10 (NIST P-224) additionally cannot be used with Integrated Mapping at all per the spec.
 - Explicit (non-standardized) domain parameters carried in PACEDomainParameterInfo.
 - Terminal Authentication and the 0x7F4C CHAT data object, and so EAC-protected data groups.
-- Passive Authentication. Section 4.4.3.5.2 requires it alongside CAM, so until it exists a CAM
-  pass only proves the chip holds the private key for the key it presented.
+- The trust half of Passive Authentication. EF.SOD's data group hashes are checked, but its
+  signature is not verified and no certificate path is built, so a CAM pass still only proves the
+  chip holds the private key for the key it presented.
 - Verifying EF.CardSecurity's CMS signature. Its SecurityInfos are read, but nothing establishes
   they are authentic; that is Passive Authentication again.
 
