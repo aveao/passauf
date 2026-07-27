@@ -16,6 +16,7 @@
 pub mod dg_parsers;
 pub mod helpers;
 pub mod icao9303;
+pub mod images;
 pub mod iso7816;
 #[cfg(feature = "pace")]
 pub mod pace;

@@ -2,6 +2,10 @@
 name = "passauf"
 version = "0.1.0"
 edition = "2021"
+# Set by hayro-jpeg2000, which is the only dependency that asks for anything
+# recent. Declared so a too-old toolchain says so rather than failing somewhere
+# inside a dependency.
+rust-version = "1.92"
 
 [lib]
 name = "passauf"
@@ -44,6 +48,12 @@ bp384 = { version = "0.14.0-rc.15", features = ["arithmetic"], optional = true }
 iso7816-tlv = "0.4.4"
 clap = { version = "4.5", features = ["derive"], optional = true }
 pcsc = { version = "2.9.0", optional = true }
+# JPEG 2000, which is how a good many issuers encode the face in DG2. Pure
+# Rust and memory-safe, which matters when the input comes off a stranger's
+# document.
+hayro-jpeg2000 = { version = "0.4", default-features = false, features = [
+    "std",
+], optional = true }
 # Android bindings
 jni = { version = "0.21", optional = true }
 serde_json = { version = "1.0", optional = true }
@@ -64,12 +74,20 @@ cli = ["dep:clap", "clap/derive"]
 # backend here: the app hands us an IsoDep tag and we exchange APDUs over it.
 android = [
     "pace",
+    "jpeg2000",
     "dep:jni",
     "dep:serde",
     "serde/derive",
     "dep:serde_json",
     "dep:log",
 ]
+# Decoding the JPEG 2000 images a document can carry in DG2, DG5 and DG7.
+#
+# This is for showing an image, not for reading or checking one: nothing in the
+# read path touches it, and a dumped file is always the bytes the chip holds.
+# It exists because Android has no JPEG 2000 decoder of its own and every
+# alternative for it is an unmaintained wrapper around OpenJPEG.
+jpeg2000 = ["dep:hayro-jpeg2000"]
 # PACE support.
 pace = [
     "dep:asn1",
