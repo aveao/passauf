@@ -20,7 +20,7 @@ cbc = { version = "0.2.1", features = ["alloc"] }
 sha2 = { version = "0.11.0", optional = true }
 aes = { version = "0.9.2", optional = true }
 cmac = { version = "0.8.0", optional = true }
-crypto-bigint = { version = "0.7", optional = true }
+crypto-bigint = { version = "0.7", features = ["alloc"], optional = true }
 elliptic-curve = { version = "0.14", features = ["arithmetic"], optional = true }
 p256 = { version = "0.14", features = ["arithmetic"], optional = true }
 p384 = { version = "0.14", features = ["arithmetic"], optional = true }

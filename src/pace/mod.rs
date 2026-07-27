@@ -1,3 +1,4 @@
+pub mod dh;
 pub mod domain;
 pub mod ecdh;
 pub mod oids;

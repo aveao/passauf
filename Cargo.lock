@@ -313,6 +313,7 @@ dependencies = [
  "hybrid-array",
  "num-traits",
  "rand_core",
+ "serdect",
  "subtle",
  "zeroize",
 ]
