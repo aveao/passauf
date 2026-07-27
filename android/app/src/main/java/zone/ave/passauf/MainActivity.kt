@@ -141,7 +141,9 @@ private fun PassaufApp(viewModel: ReaderViewModel, nfcEnabled: Boolean) {
             is ReadState.Finished -> ResultScreen(
                 report = current.report,
                 directory = current.directory,
+                filesOnDisk = current.filesOnDisk,
                 onDone = viewModel::backToForm,
+                onDiscardFiles = viewModel::discardFiles,
                 modifier = modifier,
             )
         }

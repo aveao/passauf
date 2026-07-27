@@ -156,9 +156,27 @@ What is **not** checked, and this is the important gap:
 Everything happens on the phone. There is no network permission and nothing
 leaves the device unless you explicitly share a file.
 
-A document's files are written to the app's private storage, under
-`files/documents/<timestamp>-<document number>/`. They stay there until the app's
-data is cleared. Backups and device transfers are turned off for them.
+A document's data groups carry the holder's name, date of birth and face. A
+face is biometric data, so how long a copy sits on the phone matters, and the
+answer is: not long, and never longer than one document.
+
+A read writes its files to `cache/documents/<timestamp>-<document number>/`,
+under the cache rather than the app's data directory. That means:
+
+- **One document at a time.** Starting a read deletes the previous read's
+  files, and so does opening the app, which also clears anything a crash left
+  behind.
+- **Delete now if you want.** The results screen says how many files are on the
+  phone and has a button to remove them immediately.
+- **Never backed up.** Cache is excluded from cloud backup and device transfer
+  by the platform, and `data_extraction_rules.xml` excludes everything anyway.
+- **Reclaimable.** The system may delete cache under storage pressure at any
+  time, which is the correct behaviour for files nobody has exported.
+
+Files are deliberately *not* deleted when you simply navigate back from a
+result. Sharing hands the receiving app a content URI it may not have finished
+reading, and deleting underneath it would break the export you just asked for.
+The next read, the next app start, or the delete button clears them instead.
 
 ## Layout
 

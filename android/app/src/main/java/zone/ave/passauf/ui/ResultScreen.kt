@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.automirrored.filled.Help
@@ -71,12 +72,18 @@ private val LOCAL_DATE: DateTimeFormatter =
 fun ResultScreen(
     report: DocumentReport,
     directory: File?,
+    filesOnDisk: Boolean,
     onDone: () -> Unit,
+    onDiscardFiles: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val dumped = remember(report) {
-        report.files.flatMap { it.dumped }.map(::File).filter { it.exists() }
+    val dumped = remember(report, filesOnDisk) {
+        if (!filesOnDisk) {
+            emptyList()
+        } else {
+            report.files.flatMap { it.dumped }.map(::File).filter { it.exists() }
+        }
     }
 
     LazyColumn(
@@ -120,11 +127,13 @@ fun ResultScreen(
                 )
             }
             items(report.files.filter { it.present }, key = { it.name }) { file ->
-                FileCard(file)
+                FileCard(file, filesOnDisk)
             }
         }
 
         item { LogCard(report.log) }
+
+        item { StorageCard(filesOnDisk, dumped.size, onDiscardFiles) }
 
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -138,7 +147,7 @@ fun ResultScreen(
                         Text("Export ${dumped.size} files")
                     }
                 }
-                if (report.log.isNotEmpty()) {
+                if (report.log.isNotEmpty() && filesOnDisk) {
                     OutlinedButton(
                         onClick = { Sharing.shareLog(context, directory, report.log) },
                         modifier = Modifier.fillMaxWidth(),
@@ -446,6 +455,53 @@ private fun WarningsCard(warnings: List<String>) {
     }
 }
 
+/**
+ * Where this read's files are, and how to be rid of them.
+ *
+ * A document's data groups carry the holder's name, date of birth and face,
+ * and a face is biometric data. Somebody who has read a document and moved on
+ * should not have to guess whether a copy is still sitting on the phone, so
+ * the app says plainly what it kept and offers to delete it now.
+ */
+@Composable
+private fun StorageCard(filesOnDisk: Boolean, fileCount: Int, onDiscard: () -> Unit) {
+    Card {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Files on this phone", style = MaterialTheme.typography.titleMedium)
+
+            if (!filesOnDisk) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = StatusColors.good,
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        "Deleted. What is still on screen is only held in memory, and goes " +
+                            "when you leave.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                return@Column
+            }
+
+            Text(
+                "$fileCount files are in this app's cache so you can export them. They are " +
+                    "deleted when you read the next document or reopen the app, are never " +
+                    "backed up, and never leave the phone unless you share them.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(onClick = onDiscard, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.DeleteForever, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Delete them now")
+            }
+        }
+    }
+}
+
 @Composable
 private fun DetailsCard(title: String, details: List<Detail>) {
     Card {
@@ -458,7 +514,7 @@ private fun DetailsCard(title: String, details: List<Detail>) {
 }
 
 @Composable
-private fun FileCard(file: FileReport) {
+private fun FileCard(file: FileReport, filesOnDisk: Boolean) {
     val context = LocalContext.current
     val expanded = remember { mutableStateMapOf<String, Boolean>() }
     val isOpen = expanded[file.name] == true
@@ -499,7 +555,11 @@ private fun FileCard(file: FileReport) {
                 file.details.forEach { DetailRow(it.label, it.value, monospaceValue = true) }
             }
 
-            val dumped = file.dumped.map(::File).filter { it.exists() }
+            val dumped = if (!filesOnDisk) {
+                emptyList()
+            } else {
+                file.dumped.map(::File).filter { it.exists() }
+            }
             if (dumped.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
                 dumped.forEach { saved ->

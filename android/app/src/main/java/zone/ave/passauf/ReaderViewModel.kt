@@ -73,7 +73,12 @@ sealed interface ReadState {
 
     data class Reading(val stage: String, val message: String) : ReadState
 
-    data class Finished(val report: DocumentReport, val directory: File?) : ReadState
+    data class Finished(
+        val report: DocumentReport,
+        val directory: File?,
+        /** False once the read's files have been deleted, by us or by the user. */
+        val filesOnDisk: Boolean = true,
+    ) : ReadState
 }
 
 class ReaderViewModel(application: Application) : AndroidViewModel(application) {
@@ -83,6 +88,13 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _state = MutableStateFlow<ReadState>(ReadState.Editing)
     val state: StateFlow<ReadState> = _state.asStateFlow()
+
+    init {
+        // Anything still here belongs to a previous run of the app, which by
+        // now has either been exported or is not wanted. A crash mid-read is
+        // the usual reason for finding something.
+        sweepDocuments(keep = null)
+    }
 
     fun updateForm(update: (AccessForm) -> AccessForm) {
         _form.update(update)
@@ -174,15 +186,55 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * A fresh directory for this read's files, inside the app's own storage.
+     * Delete the files of the read currently on screen.
      *
-     * Each read gets its own so a second attempt cannot leave half of an
-     * earlier document's files mixed in with this one's.
+     * A document's data groups hold the holder's name, date of birth and face.
+     * The face is biometric data, so the less time it spends on disk the
+     * better; this is for a user who has looked at a read and wants it gone
+     * without waiting for the next one to clear it.
+     */
+    fun discardFiles() {
+        val finished = _state.value as? ReadState.Finished ?: return
+        sweepDocuments(keep = null)
+        _state.value = finished.copy(filesOnDisk = false)
+    }
+
+    /**
+     * A fresh directory for this read's files.
+     *
+     * Under the cache rather than the app's data directory: these files are
+     * disposable, the system may reclaim them under storage pressure, and they
+     * are never backed up or carried to a new device. Each read gets its own
+     * directory, and taking a new one deletes the last, so at most one
+     * document's files are ever on disk.
      */
     private fun documentDirectory(form: AccessForm): File {
-        val root = File(getApplication<Application>().filesDir, "documents")
+        val root = File(getApplication<Application>().cacheDir, "documents")
         val directory = File(root, "${System.currentTimeMillis()}-${form.dumpName()}")
+        sweepDocuments(keep = directory)
         directory.mkdirs()
         return directory
+    }
+
+    /**
+     * Delete every read's files except, optionally, one.
+     *
+     * Deliberately not called when the user merely navigates back: a share
+     * hands the receiving app a content URI it may not have finished reading,
+     * and pulling the file out from under it would fail the export the user
+     * just asked for. Clearing on the next read and on the next start bounds
+     * this to one document, and [discardFiles] is there for right now.
+     */
+    private fun sweepDocuments(keep: File?) {
+        val root = File(getApplication<Application>().cacheDir, "documents")
+        val previous = root.listFiles() ?: return
+        for (directory in previous) {
+            if (directory == keep) {
+                continue
+            }
+            if (!directory.deleteRecursively()) {
+                Log.w(TAG, "Could not delete ${directory.name}")
+            }
+        }
     }
 }

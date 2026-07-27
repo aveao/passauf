@@ -60,7 +60,10 @@ object Sharing {
      * of keeping the log around at all.
      */
     fun shareLog(context: Context, directory: File?, log: List<String>) {
-        val target = File(directory ?: context.cacheDir, "passauf-log.txt")
+        // Alongside the read's own files, so it is swept with them. A read that
+        // failed before it had a directory gets one of its own.
+        val home = directory ?: File(context.cacheDir, "documents/log").apply { mkdirs() }
+        val target = File(home, "passauf-log.txt")
         target.writeText(log.joinToString("\n"))
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
