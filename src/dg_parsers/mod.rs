@@ -1,3 +1,5 @@
+#[cfg(feature = "pace")]
+pub mod ef_cardaccess;
 pub mod ef_com;
 pub mod ef_dg1;
 pub mod ef_dg11;

@@ -94,14 +94,28 @@ fn main() {
         .expect("Couldn't select an eMRTD in range.");
 
     // Read EF.CardAccess
-    let (_, file_read, _) = helpers::read_file_by_name(
+    let (_, _, parsed_card_access) = helpers::read_file_by_name(
         &mut smartcard,
         DataGroupEnum::EFCardAccess,
         &filename_distinguisher,
         &args.dump_path,
     );
-    // TODO: Use parsed_data.is_some() here when we finally can parse EF.CardAccess
-    let pace_available = file_read.is_some();
+
+    // A document can carry EF.CardAccess without offering PACE in it, so this
+    // has to come from the parsed SecurityInfos rather than from the file
+    // merely being readable.
+    #[cfg(feature = "pace")]
+    let card_access = match parsed_card_access {
+        Some(types::ParsedDataGroup::EFCardAccess(card_access)) => Some(card_access),
+        _ => None,
+    };
+    #[cfg(feature = "pace")]
+    let pace_available = card_access
+        .as_ref()
+        .map_or(false, |card_access| card_access.supports_pace());
+    #[cfg(not(feature = "pace"))]
+    let pace_available = false;
+
     if !pace_available {
         warn!("PACE isn't available on this eMRTD. Will authenticate with BAC.");
     }

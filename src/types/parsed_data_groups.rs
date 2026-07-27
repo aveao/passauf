@@ -113,6 +113,8 @@ pub struct EFDG12 {
 #[derive(Debug)]
 pub enum ParsedDataGroup {
     EFCom(EFCom),
+    #[cfg(feature = "pace")]
+    EFCardAccess(crate::types::ef_cardaccess::EFCardAccess),
     EFDG1(EFDG1),
     EFDG2_3_4(EFDG2_3_4),
     EFDG5(EFDG5),
