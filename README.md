@@ -2,6 +2,8 @@
 
 Passauf is a Rust tool that lets you read eMRTDs¹ using a standard contactless reader (\<todo) or using a Proxmark 3. It supports BAC¹ and PACE¹.
 
+It is also a library, and there is an Android app built on it under [`android/`](android/) that reads documents over the phone's own NFC radio.
+
 ![](https://elixi.re/i/7vim01so3o.png)
 
 In late 2020, I wrote an eMRTD implementation for the [Iceman firmware of Proxmark 3](https://github.com/RfidResearchGroup/proxmark3), supporting only BAC. I have been meaning to support PACE since then, but as PACE requires implementing a lot of additional crypto, I didn't really feel like doing it in C anymore². This is me fulfilling that dream, and hopefully making something that looks nicer in the process.
@@ -159,6 +161,45 @@ Two things in those appendices are worth knowing if you compare against them you
 - Appendix D quotes the BAC keys with DES parity bits adjusted. The key derivation function itself does not adjust them, since ICAO 9303 makes that step optional and the `des` crate ignores those bits, so the raw output differs in the low bit of most bytes.
 - Appendix H says it reuses the MRZ-derived key from Appendix G, but the Kπ it lists is derived from the CAN `123456`. The text is wrong; the value is what an implementation has to reproduce.
 
+## Using passauf as a library
+
+The crate is split into a library (`src/lib.rs`) and the CLI binary that uses
+it. `session::read_document` is the whole flow in one call: hand it something
+that can exchange APDUs and what unlocks the document, and it authenticates,
+reads every file, checks the data groups against EF.SOD and hands back a
+`session::DocumentRead`.
+
+The transport is yours to supply. `smartcard_abstractions::CallbackSmartcard`
+takes a closure that gets a command APDU and returns the response, which is all
+a reader has to do:
+
+```rust
+use passauf::session::{self, AccessKey, ReadOptions};
+use passauf::smartcard_abstractions::{CallbackSmartcard, Smartcard};
+
+let mut smartcard: Box<dyn Smartcard> = Box::new(CallbackSmartcard::new(|apdu| {
+    // Whatever your reader does. Return the response APDU, status bytes and all.
+    my_reader.transceive(apdu)
+}));
+
+let options = ReadOptions {
+    access_key: AccessKey::Can("123456".to_string()),
+    read_binary_files: true,
+    ..Default::default()
+};
+let document = session::read_document(&mut smartcard, &options, &mut |_| {})?;
+```
+
+The PC/SC and Proxmark backends, the CLI and PACE are all features, so a build
+that only needs the library can leave out whatever it does not use:
+
+```bash
+cargo build --no-default-features --features pace
+```
+
+The `android` feature adds JNI entry points for the app under `android/`; see
+[its README](android/README.md) for how the two halves fit together.
+
 ## Proxmark3 support
 
 ### Background on Proxmark3
@@ -211,3 +252,5 @@ Pass auf translates to "watch out". There's no real implication there, it's just
 - I like explicit returns and use them a lot.
 - This project requires `std`.
 - There are some panics around that I intend to get rid of before late.
+    - The JNI layer catches them rather than letting them unwind across the
+      boundary, but they are still panics, and a `Result` would be better.
