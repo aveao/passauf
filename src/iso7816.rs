@@ -16,7 +16,14 @@ pub enum Command {
     SelectFile = 0xA4,
     GetChallenge = 0x84,
     ExternalAuthentication = 0x82,
+    ManageSecurityEnvironment = 0x22,
+    GeneralAuthenticate = 0x86,
 }
+
+/// Marks a command as one link of a chain (ISO/IEC 7816-4 section 5.1.1).
+///
+/// PACE requires every GENERAL AUTHENTICATE but the last to set this.
+pub const CLA_COMMAND_CHAINING: u8 = 0x10;
 
 // Taken from https://github.com/RfidResearchGroup/proxmark3/blob/master/include/protocols.h#L502
 // and extended from ISO/IEC 7816-4
@@ -79,23 +86,50 @@ pub struct ApduCommand {
 }
 
 impl ApduCommand {
-    fn get_field_len_vec(field: u16) -> Vec<u8> {
-        let field_bytes = field.to_le_bytes();
-        let field_len: Vec<u8> = match field {
+    /// Encode the Lc and Le fields for a command with the given data and Le.
+    ///
+    /// ISO/IEC 7816-4 section 5.1: a command is short when its data fits in 255
+    /// bytes and its Le in 256, and extended otherwise. The two fields have to
+    /// agree, so one long field forces the other into the extended form as
+    /// well. Both are big-endian.
+    ///
+    /// An Le of 0 means no response data is expected and the field is left out.
+    /// In the short form an Le of 256 is written as a single 0x00.
+    fn get_length_fields(data_len: usize, max_resp_len: u16) -> (Vec<u8>, Vec<u8>) {
+        let extended = data_len > 255 || max_resp_len > 256;
+
+        if !extended {
+            let lc = match data_len {
+                0 => vec![],
+                _ => vec![data_len as u8],
+            };
+            let le = match max_resp_len {
+                0 => vec![],
+                // 256 truncates to 0x00, which is exactly how it is written.
+                _ => vec![max_resp_len as u8],
+            };
+            return (lc, le);
+        }
+
+        let lc = match data_len {
             0 => vec![],
-            1..256 => vec![field as u8],
-            256.. => vec![0, field_bytes[0], field_bytes[1]],
+            // The leading 0x00 marks the command as extended.
+            _ => vec![0x00, (data_len >> 8) as u8, data_len as u8],
         };
-        return field_len;
+        let le = match (max_resp_len, data_len) {
+            (0, _) => vec![],
+            // With no data field there is no leading 0x00 yet, so Le carries it.
+            (_, 0) => vec![0x00, (max_resp_len >> 8) as u8, max_resp_len as u8],
+            // Otherwise Lc already marked the command extended.
+            _ => vec![(max_resp_len >> 8) as u8, max_resp_len as u8],
+        };
+        return (lc, le);
     }
 
     /// Serialize the APDU to a byte stream
     pub fn serialize(&self) -> Vec<u8> {
         // https://en.wikipedia.org/wiki/Smart_card_application_protocol_data_unit#APDU_message_command-response_pair
-        // Lc: length of data
-        let lc = Self::get_field_len_vec(self.data.len() as u16);
-        // Le: length of expected response
-        let le = Self::get_field_len_vec(self.max_resp_len);
+        let (lc, le) = Self::get_length_fields(self.data.len(), self.max_resp_len);
 
         let apdu = vec![
             vec![self.cla, self.ins, self.p1, self.p2],
@@ -127,7 +161,9 @@ impl ApduCommand {
         let cla = self.cla | 0x0C;
 
         // Le: length of expected response
-        let base_le = Self::get_field_len_vec(self.max_resp_len);
+        // DO'97' carries the original Le, in the form it would have taken in
+        // an unsecured command.
+        let (_, base_le) = Self::get_length_fields(0, self.max_resp_len);
         let cmd = vec![cla, self.ins, self.p1, self.p2];
         let padded_cmd = sm.pad(&cmd);
         debug!("padded_cmd: {:02x?}", padded_cmd);
@@ -196,11 +232,8 @@ impl ApduCommand {
         secure_data.extend_from_slice(&do_8e_tlv.to_vec());
         debug!("final secure_data: {:02x?}", secure_data);
 
-        // Lc: length of data
-        let lc = Self::get_field_len_vec(secure_data.len() as u16);
-
-        // Outer Le is set to 0x00 to allow the full frame
-        let le = vec![0x00];
+        // Outer Le is set to 256 (written as 0x00) to allow the full frame.
+        let (lc, le) = Self::get_length_fields(secure_data.len(), 256);
 
         let apdu = vec![cmd, lc, secure_data, le].concat();
         return apdu;
@@ -492,6 +525,60 @@ pub fn apdu_get_challenge() -> ApduCommand {
         p2: 0,
         data: vec![],
         max_resp_len: 8, // rnd.ic is 8 bytes
+    };
+}
+
+/// MSE:Set AT, which selects and initializes PACE (ICAO 9303 p11 section 4.4.4.1)
+///
+/// The data objects are 0x80 for the protocol OID, 0x83 for the password
+/// reference, and 0x84 for the domain parameter ID when the document offers
+/// more than one set and the choice would otherwise be ambiguous.
+#[cfg(feature = "pace")]
+pub fn apdu_mse_set_at(
+    protocol_oid: &[u8],
+    password_reference: u8,
+    parameter_id: Option<u64>,
+) -> ApduCommand {
+    let mut data = vec![];
+    // 0x80: cryptographic mechanism reference, the OID's value with the 0x06
+    // tag omitted.
+    data.extend_from_slice(&[0x80, protocol_oid.len() as u8]);
+    data.extend_from_slice(protocol_oid);
+    // 0x83: reference of a public key / secret key, i.e. which password.
+    data.extend_from_slice(&[0x83, 0x01, password_reference]);
+    // 0x84: reference of a private key, i.e. which domain parameters.
+    if let Some(parameter_id) = parameter_id {
+        data.extend_from_slice(&[0x84, 0x01, parameter_id as u8]);
+    }
+
+    return ApduCommand {
+        cla: 0,
+        ins: Command::ManageSecurityEnvironment as u8,
+        // Set Authentication Template for mutual authentication.
+        p1: 0xC1,
+        p2: 0xA4,
+        data,
+        // MSE:Set AT returns no data.
+        max_resp_len: 0,
+    };
+}
+
+/// One GENERAL AUTHENTICATE of the PACE chain (ICAO 9303 p11 section 4.4.4.2)
+///
+/// The protocol data objects are wrapped in a Dynamic Authentication Data
+/// object (tag 0x7C). Every command but the last one in the chain sets the
+/// command chaining bit.
+#[cfg(feature = "pace")]
+pub fn apdu_general_authenticate(inner_data: Vec<u8>, is_last: bool) -> ApduCommand {
+    return ApduCommand {
+        cla: if is_last { 0 } else { CLA_COMMAND_CHAINING },
+        ins: Command::GeneralAuthenticate as u8,
+        // Keys and protocol implicitly known.
+        p1: 0,
+        p2: 0,
+        data: helpers::encode_ber(&[0x7C], &inner_data),
+        // 256, written as a single 0x00, as in the worked examples.
+        max_resp_len: 256,
     };
 }
 

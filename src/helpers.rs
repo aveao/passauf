@@ -24,6 +24,26 @@ pub fn asn1_parse_len(data: Vec<u8>) -> (u8, u32) {
     return result;
 }
 
+/// Encode a BER-TLV from raw tag bytes and a value.
+///
+/// iso7816_tlv refuses to build a constructed tag around an opaque value, but
+/// PACE's wrappers (0x7C and 0x7F49) are exactly that: constructed tags whose
+/// contents we have already serialized. The definite length forms here are the
+/// ones ISO/IEC 7816-4 allows.
+pub fn encode_ber(tag: &[u8], value: &[u8]) -> Vec<u8> {
+    let mut encoded = tag.to_vec();
+    match value.len() {
+        // Short form, the length in a single byte.
+        0..=127 => encoded.push(value.len() as u8),
+        // Long form, one following length byte.
+        128..=255 => encoded.extend_from_slice(&[0x81, value.len() as u8]),
+        // Long form, two following length bytes.
+        _ => encoded.extend_from_slice(&[0x82, (value.len() >> 8) as u8, value.len() as u8]),
+    }
+    encoded.extend_from_slice(value);
+    return encoded;
+}
+
 pub fn get_tlv_value_bytes(input_tlv: &ber::Tlv) -> Vec<u8> {
     match input_tlv.value() {
         ber::Value::Primitive(data) => {

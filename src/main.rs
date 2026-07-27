@@ -141,19 +141,67 @@ fn main() {
     let _ = iso7816::apdu_select_file_by_name(icao9303::AID_MRTD_LDS1.to_vec())
         .exchange(&mut smartcard, true);
 
-    // Authenticate
-    if args.card_access_number.is_some() {
-        panic!("PACE/CAN isn't implemented, cannot proceed with authentication.");
-    }
-    if pace_available {
-        info!("PACE is available on this document, but it's not implemented by passauf yet.");
-    }
-    let mut sm = icao9303::do_bac_authentication(
-        &mut smartcard,
-        &args.document_number.as_ref().unwrap(),
-        &args.date_of_birth.unwrap(),
-        &args.date_of_expiry.unwrap(),
-    );
+    // Authenticate, preferring PACE when the document offers a variant we can
+    // run, and falling back to BAC otherwise.
+    #[cfg(feature = "pace")]
+    let pace_session = match (pace_available, &card_access) {
+        (true, Some(card_access)) => {
+            let pace_password = match &args.card_access_number {
+                Some(card_access_number) => {
+                    Some(pace::password::Password::Can(card_access_number.clone()))
+                }
+                // The MRZ password needs all three fields, which clap only
+                // guarantees when no CAN was given.
+                None => match (
+                    &args.document_number,
+                    &args.date_of_birth,
+                    &args.date_of_expiry,
+                ) {
+                    (Some(document_number), Some(date_of_birth), Some(date_of_expiry)) => {
+                        Some(pace::password::Password::Mrz {
+                            document_number: document_number.clone(),
+                            date_of_birth: date_of_birth.clone(),
+                            date_of_expiry: date_of_expiry.clone(),
+                        })
+                    }
+                    _ => None,
+                },
+            };
+
+            match pace_password {
+                Some(pace_password) => pace::try_pace(
+                    &mut smartcard,
+                    card_access.pace_infos().as_slice(),
+                    &pace_password,
+                ),
+                None => None,
+            }
+        }
+        _ => None,
+    };
+    #[cfg(not(feature = "pace"))]
+    let pace_session: Option<secure_messaging::SecureMessaging> = None;
+
+    let mut sm = match pace_session {
+        Some(sm) => sm,
+        None => {
+            if args.card_access_number.is_some() {
+                panic!(
+                    "PACE did not succeed and BAC needs the document number, date of birth \
+                     and date of expiry, which a CAN cannot substitute for."
+                );
+            }
+            if pace_available {
+                warn!("Falling back to BAC.");
+            }
+            icao9303::do_bac_authentication(
+                &mut smartcard,
+                &args.document_number.as_ref().unwrap(),
+                args.date_of_birth.as_ref().unwrap(),
+                args.date_of_expiry.as_ref().unwrap(),
+            )
+        }
+    };
 
     // Read EF.COM, which contains a file list
     let (_, _, parse_result) = helpers::secure_read_file_by_name(

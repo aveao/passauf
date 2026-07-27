@@ -22,6 +22,7 @@ const UNCOMPRESSED_POINT_TAG: u8 = 0x04;
 /// Curve operations PACE needs, with everything expressed as bytes.
 pub trait EcCurveOps {
     /// Width of a field element in bytes, i.e. of one point coordinate.
+    #[allow(dead_code)]
     fn field_size(&self) -> usize;
 
     /// The curve's standard generator, SEC1 encoded.
@@ -34,6 +35,7 @@ pub trait EcCurveOps {
     fn generate_keypair(&self, generator: &[u8]) -> Option<(Vec<u8>, Vec<u8>)>;
 
     /// Multiply a point by a scalar, returning the SEC1 encoded result.
+    #[allow(dead_code)]
     fn multiply(&self, point: &[u8], scalar: &[u8]) -> Option<Vec<u8>>;
 
     /// The Generic Mapping of ICAO 9303 p11 section 4.4.3.3.1.

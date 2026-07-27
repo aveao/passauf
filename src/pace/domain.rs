@@ -372,6 +372,7 @@ pub enum DomainParameter {
 }
 
 impl DomainParameter {
+    #[allow(dead_code)]
     pub fn is_supported(&self) -> bool {
         return match self {
             // All three MODP groups are usable.

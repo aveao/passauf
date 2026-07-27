@@ -106,6 +106,32 @@ pub fn kdf(algorithm: SmAlgorithm, shared_secret: &[u8], counter: u32) -> Vec<u8
     return keydata[..algorithm.key_length()].to_vec();
 }
 
+/// Decrypt in CBC mode with an all-zero IV.
+///
+/// PACE's encrypted nonce uses this rather than the session's IV rule
+/// (ICAO 9303 p11 section 4.4.3.3), so it sits outside [`SecureMessaging`].
+#[cfg(feature = "pace")]
+pub fn cbc_decrypt_zero_iv(algorithm: SmAlgorithm, key: &[u8], data: &[u8]) -> Vec<u8> {
+    return match algorithm {
+        SmAlgorithm::Tdes => TDesCbcDec::new_from_slices(key, &[0u8; 8])
+            .unwrap()
+            .decrypt_padded_vec::<block_padding::NoPadding>(data)
+            .unwrap(),
+        SmAlgorithm::Aes128 => cbc::Decryptor::<aes::Aes128>::new_from_slices(key, &[0u8; 16])
+            .unwrap()
+            .decrypt_padded_vec::<block_padding::NoPadding>(data)
+            .unwrap(),
+        SmAlgorithm::Aes192 => cbc::Decryptor::<aes::Aes192>::new_from_slices(key, &[0u8; 16])
+            .unwrap()
+            .decrypt_padded_vec::<block_padding::NoPadding>(data)
+            .unwrap(),
+        SmAlgorithm::Aes256 => cbc::Decryptor::<aes::Aes256>::new_from_slices(key, &[0u8; 16])
+            .unwrap()
+            .decrypt_padded_vec::<block_padding::NoPadding>(data)
+            .unwrap(),
+    };
+}
+
 /// An established secure messaging session.
 #[derive(Debug)]
 pub struct SecureMessaging {

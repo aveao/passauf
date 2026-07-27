@@ -18,6 +18,8 @@ pub struct DhGroupOps {
     bits: u32,
     /// Width of the prime in bytes, which every encoded value is padded to.
     length: usize,
+    /// The prime as given, kept for callers that need it as bytes.
+    prime_bytes: &'static [u8],
 }
 
 impl DhGroupOps {
@@ -34,12 +36,24 @@ impl DhGroupOps {
             p,
             bits,
             length: group.p.len(),
+            prime_bytes: group.p,
         };
     }
 
     /// Encoded width of a group element in bytes.
+    #[allow(dead_code)]
     pub fn length(&self) -> usize {
         return self.length;
+    }
+
+    /// The group's standard generator g, encoded.
+    pub fn generator(&self) -> Vec<u8> {
+        return self.encode(&self.g);
+    }
+
+    /// The group's prime p, encoded. The Integrated Mapping reduces into it.
+    pub fn prime(&self) -> &'static [u8] {
+        return self.prime_bytes;
     }
 
     fn decode(&self, bytes: &[u8]) -> Option<BoxedUint> {
