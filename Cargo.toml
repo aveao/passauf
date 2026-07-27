@@ -44,6 +44,12 @@ bp384 = { version = "0.14.0-rc.15", features = ["arithmetic"], optional = true }
 iso7816-tlv = "0.4.4"
 clap = { version = "4.5", features = ["derive"], optional = true }
 pcsc = { version = "2.9.0", optional = true }
+# Android bindings
+jni = { version = "0.21", optional = true }
+serde_json = { version = "1.0", optional = true }
+# The logging facade behind simplelog's macros, so the Android build can put a
+# logger of its own behind them.
+log = { version = "0.4", optional = true }
 
 [features]
 # to make development easier, all features are on by default. this will change later.
@@ -54,6 +60,16 @@ proxmark = ["dep:serialport", "dep:serde", "serde/derive", "dep:bincode", "dep:b
 pcsc = ["dep:pcsc"]
 # cli tool inclusion
 cli = ["dep:clap", "clap/derive"]
+# JNI entry points for the Android app under android/. There is no reader
+# backend here: the app hands us an IsoDep tag and we exchange APDUs over it.
+android = [
+    "pace",
+    "dep:jni",
+    "dep:serde",
+    "serde/derive",
+    "dep:serde_json",
+    "dep:log",
+]
 # PACE support.
 pace = [
     "dep:asn1",

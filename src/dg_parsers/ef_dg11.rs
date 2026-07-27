@@ -43,7 +43,7 @@ pub fn parser(
     debug!("base_tlv: {:02x?}", &base_tlv);
 
     let base_tlv_tag = helpers::get_tlv_tag(&base_tlv);
-    if base_tlv_tag != data_group.tag.into() {
+    if base_tlv_tag != u16::from(data_group.tag) {
         warn!(
             "Found {}'s TLV tag as 0x{} (expected 0x{}), skipping parsing.",
             data_group.name, base_tlv_tag, data_group.tag

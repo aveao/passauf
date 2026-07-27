@@ -25,3 +25,7 @@ pub mod secure_messaging;
 pub mod session;
 pub mod smartcard_abstractions;
 pub mod types;
+
+/// The JNI surface the Android app calls. Nothing else should need it.
+#[cfg(feature = "android")]
+mod ffi;

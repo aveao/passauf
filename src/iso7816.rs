@@ -274,7 +274,13 @@ impl ApduCommand {
                 None => self.serialize(),
             };
 
-            rapdu_data = smartcard.exchange_apdu(&apdu_bytes).unwrap();
+            // Nothing below this layer can carry on without a response, and a
+            // caller reading the message wants to know what actually happened,
+            // which is almost always the card leaving the field.
+            rapdu_data = smartcard.exchange_apdu(&apdu_bytes).expect(
+                "The card stopped responding mid-exchange, most likely because it moved out \
+                 of the reader's field.",
+            );
             status_code_bytes = get_status_code_bytes(&rapdu_data);
 
             // - 2 bytes for status code
