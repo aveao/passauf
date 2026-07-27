@@ -9,8 +9,11 @@
 /// needs the country signing certificates passauf does not handle yet, so
 /// nothing read out of this file is trustworthy on its own.
 use iso7816_tlv::ber;
-use simplelog::{debug, info, warn};
+#[cfg(feature = "cli")]
+use simplelog::info;
+use simplelog::{debug, warn};
 
+#[cfg(feature = "cli")]
 use crate::dg_parsers::helpers as dg_helpers;
 use crate::dg_parsers::security_infos::{self, TAG_SET};
 use crate::helpers;

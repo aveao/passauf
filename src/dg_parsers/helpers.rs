@@ -1,10 +1,16 @@
 use iso7816_tlv::ber;
-use simplelog::{debug, info, warn};
-use std::{cmp::max, collections::HashMap};
+#[cfg(feature = "cli")]
+use simplelog::info;
+use simplelog::{debug, warn};
+#[cfg(feature = "cli")]
+use std::cmp::max;
+use std::collections::HashMap;
 
 use crate::{helpers, types};
 
+#[cfg(feature = "cli")]
 pub(crate) const SECTION_TITLE_PAD_TO_LEN: usize = 56;
+#[cfg(feature = "cli")]
 const PRINT_TITLE_PAD_TO_LEN: usize = 25;
 
 pub(crate) fn tlv_get_string_value(tlvs: &HashMap<u16, &ber::Tlv>, tag: &u16) -> Option<String> {
@@ -231,6 +237,7 @@ pub fn format_date(dd: u8, mm: u8, yyyy: u16) -> String {
     );
 }
 
+#[cfg(feature = "cli")]
 pub(crate) fn print_section_intro(datagroup: &types::DataGroup) {
     info!("");
     info!("{}", pad_section_title(datagroup.name));
@@ -238,6 +245,7 @@ pub(crate) fn print_section_intro(datagroup: &types::DataGroup) {
     info!("");
 }
 
+#[cfg(feature = "cli")]
 /// Pads a section title with =s up to 56 characters.
 pub(crate) fn pad_section_title(text: &str) -> String {
     let text_to_pad = format!(" <blue>{}</> ", text);
@@ -249,6 +257,7 @@ pub(crate) fn pad_section_title(text: &str) -> String {
     );
 }
 
+#[cfg(feature = "cli")]
 /// Pads a section subtitle with spaces up to 56 characters.
 pub(crate) fn pad_section_subtitle(text: &str) -> String {
     let text_to_pad = format!("({})", text);
@@ -259,13 +268,14 @@ pub(crate) fn pad_section_subtitle(text: &str) -> String {
     );
 }
 
+#[cfg(feature = "cli")]
 fn pad_with_ellipses(text: &str) -> String {
     // max here is to avoid overflowing
     let pad_len = max(PRINT_TITLE_PAD_TO_LEN, text.len()) - text.len();
     return format!("<b>{}</>{:.<pad_len$}", text, "");
 }
 
-pub(crate) fn parse_mrz_sex(sex: char) -> String {
+pub fn parse_mrz_sex(sex: char) -> String {
     // https://www.youtube.com/watch?v=HNy_retSME0
     return match sex {
         'M' => "Male".to_string(),
@@ -275,7 +285,7 @@ pub(crate) fn parse_mrz_sex(sex: char) -> String {
     };
 }
 
-pub(crate) fn parse_mrz_document_code(document_code: &String, country_code: &String) -> String {
+pub fn parse_mrz_document_code(document_code: &String, country_code: &String) -> String {
     // https://wf.lavatech.top/aves-tech-notes/emrtd-data-quirks see document type codes
     if document_code.len() != 2 {
         return document_code.to_string();

@@ -1,7 +1,7 @@
 use crate::types::MRZ;
 use strum::FromRepr;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EFCom {
     // ICAO 9303 part 10, edition 8, 4.6.1
     pub lds_version: Option<[u8; 4]>,
@@ -72,13 +72,13 @@ pub struct EFDG7 {
 }
 
 /// One data group's expected hash, as EF.SOD records it.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DataGroupHash {
     pub data_group_number: u64,
     pub hash: Vec<u8>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EFSOD {
     // ICAO 9303 part 10, edition 8, 4.6.2
     pub hash_algorithm: crate::icao9303::DocumentHashAlgorithm,

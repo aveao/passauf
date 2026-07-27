@@ -347,10 +347,12 @@ pub struct DataGroup {
     // Whether this file should be read when printing info
     pub is_binary: bool,
     pub parser: fn(&Vec<u8>, &DataGroup, bool) -> Option<types::ParsedDataGroup>,
+    /// Writes the file out, returning every path it created. A data group that
+    /// holds images writes those alongside the raw file.
     pub dumper: fn(
         &Vec<u8>,
         &Option<types::ParsedDataGroup>,
         &std::path::Path,
         &String,
-    ) -> Result<(), std::io::Error>,
+    ) -> Result<Vec<std::path::PathBuf>, std::io::Error>,
 }

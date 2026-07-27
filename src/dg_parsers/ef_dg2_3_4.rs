@@ -4,7 +4,10 @@ use crate::helpers;
 use crate::types;
 use iso7816_tlv::ber;
 use simplelog::{debug, info, warn};
-use std::{fs, io, path::Path};
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 
 impl types::EFDG2_3_4 {
     #[cfg(feature = "cli")]
@@ -89,12 +92,12 @@ pub fn dumper(
     parsed_data: &Option<types::ParsedDataGroup>,
     base_path: &Path,
     base_filename: &String,
-) -> Result<(), io::Error> {
-    generic_dumper(file_data, parsed_data, base_path, &base_filename)?;
+) -> Result<Vec<PathBuf>, io::Error> {
+    let mut written = generic_dumper(file_data, parsed_data, base_path, &base_filename)?;
 
     if parsed_data.is_none() {
         warn!("Could not dump EF_DG2/3/4 pictures, parsed data is empty.");
-        return Ok(());
+        return Ok(written);
     }
 
     let ef_dg2_file: &types::EFDG2_3_4 = match parsed_data.as_ref().unwrap() {
@@ -110,15 +113,13 @@ pub fn dumper(
         let mut file_path = base_path.join(image_filename);
         file_path.set_extension(biometric.image_format.get_extension());
 
-        // Create, write to and sync file.
-        let mut f = fs::File::create(&file_path)?;
-        io::Write::write_all(&mut f, &biometric.data)?;
-        f.sync_all()?;
+        crate::dg_parsers::generic::write_file(&file_path, &biometric.data)?;
 
         info!(
             "<magenta>Saved image to {}</>",
             &file_path.to_string_lossy()
         );
+        written.push(file_path);
     }
-    return Ok(());
+    return Ok(written);
 }

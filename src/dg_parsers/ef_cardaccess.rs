@@ -1,6 +1,9 @@
 use iso7816_tlv::ber;
-use simplelog::{debug, info, warn};
+#[cfg(feature = "cli")]
+use simplelog::info;
+use simplelog::{debug, warn};
 
+#[cfg(feature = "cli")]
 use crate::dg_parsers::helpers as dg_helpers;
 use crate::helpers;
 use crate::pace::oids::PaceAlgorithm;
@@ -17,6 +20,7 @@ const TAG_INTEGER: u16 = 0x02;
 
 /// Why we cannot run a PACEInfo, covering both the algorithm and its domain
 /// parameters.
+#[cfg(any(feature = "cli", test))]
 fn unsupported_reason(pace_info: &PaceInfo) -> Option<String> {
     if let Some(reason) = pace_info.algorithm.unsupported_reason() {
         return Some(reason.to_string());

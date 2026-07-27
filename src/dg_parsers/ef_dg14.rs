@@ -1,6 +1,9 @@
 use iso7816_tlv::ber;
-use simplelog::{debug, info, warn};
+#[cfg(feature = "cli")]
+use simplelog::info;
+use simplelog::{debug, warn};
 
+#[cfg(feature = "cli")]
 use crate::dg_parsers::helpers as dg_helpers;
 use crate::dg_parsers::security_infos::{self, TAG_SET};
 use crate::helpers;

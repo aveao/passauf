@@ -2,11 +2,17 @@
 use pcsc::{Context, Scope};
 #[cfg(feature = "proxmark")]
 use serialport::SerialPort;
-use simplelog::{debug, error, info, warn};
-use std::{ffi::CString, fmt, str::FromStr};
+use simplelog::{debug, trace};
+#[cfg(any(feature = "pcsc", feature = "proxmark"))]
+use simplelog::{error, info, warn};
+#[cfg(feature = "pcsc")]
+use std::ffi::CString;
+use std::{fmt, str::FromStr};
 use strum::IntoStaticStr;
 
-use crate::{proxmark, types};
+#[cfg(feature = "proxmark")]
+use crate::proxmark;
+use crate::types;
 
 #[derive(Debug, Clone, IntoStaticStr)]
 pub enum ReaderInterface {
@@ -35,25 +41,39 @@ impl FromStr for ReaderInterface {
 }
 
 impl ReaderInterface {
-    pub fn connect(&self, path: &Option<String>) -> Option<Box<dyn InterfaceDevice>> {
+    pub fn connect(
+        &self,
+        #[cfg_attr(
+            not(any(feature = "pcsc", feature = "proxmark")),
+            allow(unused_variables)
+        )]
+        path: &Option<String>,
+    ) -> Option<Box<dyn InterfaceDevice>> {
+        // Each backend is its own feature, so an arm is only compiled when the
+        // backend behind it is. The fallbacks say which one is missing rather
+        // than leaving the user wondering why nothing happened.
         match self {
+            #[cfg(feature = "proxmark")]
             ReaderInterface::Proxmark => {
-                if !cfg!(feature = "proxmark") {
-                    error!("Cannot connect via Proxmark, feature was disabled at compile-time.");
-                    return None;
-                }
-
-                let proxmark_interface = ProxmarkInterface::connect(path.as_ref()).unwrap();
+                let proxmark_interface = ProxmarkInterface::connect(path.as_ref())?;
                 return Some(Box::new(proxmark_interface));
             }
+            #[cfg(not(feature = "proxmark"))]
+            ReaderInterface::Proxmark => {
+                simplelog::error!(
+                    "Cannot connect via Proxmark, feature was disabled at compile-time."
+                );
+                return None;
+            }
+            #[cfg(feature = "pcsc")]
             ReaderInterface::PCSC => {
-                if !cfg!(feature = "pcsc") {
-                    error!("Cannot connect via PCSC, feature was disabled at compile-time.");
-                    return None;
-                }
-
-                let pcsc_interface = PCSCInterface::connect(path.as_ref()).unwrap();
+                let pcsc_interface = PCSCInterface::connect(path.as_ref())?;
                 return Some(Box::new(pcsc_interface));
+            }
+            #[cfg(not(feature = "pcsc"))]
+            ReaderInterface::PCSC => {
+                simplelog::error!("Cannot connect via PCSC, feature was disabled at compile-time.");
+                return None;
             }
         };
     }
@@ -288,6 +308,64 @@ pub struct PCSCSmartcard {
 impl Drop for PCSCSmartcard {
     fn drop(&mut self) {
         // Card implements Drop which automatically disconnects the card using Disposition::ResetCard.
+    }
+}
+
+/// A smartcard whose APDU exchanges are handled by a closure the caller supplies.
+///
+/// This exists for transports passauf knows nothing about. The Android app uses
+/// it to hand each APDU to `IsoDep.transceive`; a test can use it to replay a
+/// recorded exchange. The closure gets the command APDU and returns the
+/// response APDU with its two status bytes still attached, exactly as the card
+/// sent it, or None if the exchange failed.
+pub struct CallbackSmartcard<F>
+where
+    F: FnMut(&[u8]) -> Option<Vec<u8>>,
+{
+    transceive: F,
+}
+
+impl<F> CallbackSmartcard<F>
+where
+    F: FnMut(&[u8]) -> Option<Vec<u8>>,
+{
+    pub fn new(transceive: F) -> Self {
+        return CallbackSmartcard { transceive };
+    }
+}
+
+impl<F> Drop for CallbackSmartcard<F>
+where
+    F: FnMut(&[u8]) -> Option<Vec<u8>>,
+{
+    fn drop(&mut self) {
+        // The transport belongs to whoever supplied the closure, so there is
+        // nothing here to tear down.
+    }
+}
+
+impl<F> Smartcard for CallbackSmartcard<F>
+where
+    F: FnMut(&[u8]) -> Option<Vec<u8>>,
+{
+    fn exchange_apdu(&mut self, data: &Vec<u8>) -> Option<Vec<u8>> {
+        trace!("Sending APDU: {:02x?}", data);
+        let response = (self.transceive)(data)?;
+        trace!("Got RAPDU: {:02x?}", response);
+        // Two status bytes are the minimum a response can be, and the layers
+        // above slice them off unconditionally.
+        if response.len() < 2 {
+            debug!(
+                "Response APDU is too short to hold a status word ({} bytes).",
+                response.len()
+            );
+            return None;
+        }
+        return Some(response);
+    }
+
+    fn exchange_command(&mut self, data: &Vec<u8>) -> Option<Vec<u8>> {
+        return self.exchange_apdu(data);
     }
 }
 

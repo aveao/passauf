@@ -2,14 +2,7 @@ use iso7816_tlv::ber;
 use simplelog::warn;
 use std::cmp::max;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-use crate::iso7816;
-use crate::secure_messaging::SecureMessaging;
-use crate::smartcard_abstractions::Smartcard;
-use crate::types;
-use crate::types::ParsedDataGroup;
 
 pub fn asn1_parse_len(data: Vec<u8>) -> (u8, u32) {
     let result: (u8, u32) = match data[0] {
@@ -143,103 +136,10 @@ pub fn get_tlv_by_tag(tlvs: &Vec<ber::Tlv>, desired_tag_number: u16) -> Option<&
     return None;
 }
 
-/// Selects, reads, parses and dumps file
-///
-/// Returns (dg_info, file_read, parsed_data)
-pub fn read_file_by_name<'a>(
-    smartcard: &'a mut Box<impl Smartcard + ?Sized>,
-    file: types::DataGroupEnum,
-    filename_distinguisher: &String,
-    base_dump_path: &Option<PathBuf>,
-) -> (
-    &'a types::DataGroup,
-    Option<Vec<u8>>,
-    Option<ParsedDataGroup>,
-) {
-    let dg_info = &types::DATA_GROUPS[file as usize];
-    let (file_read, parsed_data) =
-        read_file(smartcard, &dg_info, filename_distinguisher, base_dump_path);
-    return (dg_info, file_read, parsed_data);
-}
-
-/// Selects, reads, parses and dumps file
-///
-/// Returns (file_read, parsed_data)
-pub fn read_file(
-    smartcard: &mut Box<impl Smartcard + ?Sized>,
-    dg_info: &types::DataGroup,
-    filename_distinguisher: &String,
-    base_dump_path: &Option<PathBuf>,
-) -> (Option<Vec<u8>>, Option<ParsedDataGroup>) {
-    return secure_read_file(
-        smartcard,
-        &dg_info,
-        filename_distinguisher,
-        base_dump_path,
-        None,
-    );
-}
-
-/// Selects, reads, parses and dumps file with secure comms
-///
-/// Returns (dg_info, file_read, parsed_data)
-pub fn secure_read_file_by_name<'a>(
-    smartcard: &'a mut Box<impl Smartcard + ?Sized>,
-    file: types::DataGroupEnum,
-    filename_distinguisher: &String,
-    base_dump_path: &Option<PathBuf>,
-    sm: Option<&mut SecureMessaging>,
-) -> (
-    &'a types::DataGroup,
-    Option<Vec<u8>>,
-    Option<ParsedDataGroup>,
-) {
-    let dg_info = &types::DATA_GROUPS[file as usize];
-    let (file_read, parsed_data) = secure_read_file(
-        smartcard,
-        &dg_info,
-        filename_distinguisher,
-        base_dump_path,
-        sm,
-    );
-    return (dg_info, file_read, parsed_data);
-}
-
-/// Selects, reads, parses and dumps file with secure comms
-///
-/// Returns (file_read, parsed_data)
-pub fn secure_read_file(
-    smartcard: &mut Box<impl Smartcard + ?Sized>,
-    dg_info: &types::DataGroup,
-    filename_distinguisher: &String,
-    base_dump_path: &Option<PathBuf>,
-    sm: Option<&mut SecureMessaging>,
-) -> (Option<Vec<u8>>, Option<ParsedDataGroup>) {
-    let file_read = iso7816::select_and_read_file(smartcard, dg_info, sm);
-    let mut parsed_data: Option<ParsedDataGroup> = None;
-    match file_read {
-        Some(ref file_data) => {
-            parsed_data = (dg_info.parser)(&file_data, &dg_info, true);
-            let filename = format!("{}-{}", filename_distinguisher, dg_info.name).replace(".", "_");
-
-            if base_dump_path.is_some() {
-                let _ = (dg_info.dumper)(
-                    &file_data,
-                    &parsed_data,
-                    base_dump_path.as_ref().unwrap(),
-                    &filename,
-                );
-            }
-        }
-        None => {}
-    }
-    return (file_read, parsed_data);
-}
-
 /// Get the current unix time.
 ///
 /// Assumes we're after 1970 and before 292271023045 :^)
-pub(crate) fn unix_time() -> u64 {
+pub fn unix_time() -> u64 {
     // the .unwrap() here assumes we're not in <1970
     return SystemTime::now()
         .duration_since(UNIX_EPOCH)

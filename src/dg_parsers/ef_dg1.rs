@@ -2,7 +2,9 @@ use crate::dg_parsers::helpers as dg_helpers;
 use crate::helpers;
 use crate::types;
 use iso7816_tlv::ber;
-use simplelog::{debug, info, warn};
+#[cfg(feature = "cli")]
+use simplelog::info;
+use simplelog::{debug, warn};
 
 impl types::TD1Mrz {
     #[cfg(feature = "cli")]

@@ -19,9 +19,12 @@
 /// over this object is *not* verified, which would need the issuing country's
 /// certificates. See the note in the README about Passive Authentication.
 use iso7816_tlv::ber;
-use simplelog::{debug, info, warn};
+#[cfg(feature = "cli")]
+use simplelog::info;
+use simplelog::{debug, warn};
 
 use crate::dg_parsers::cms;
+#[cfg(feature = "cli")]
 use crate::dg_parsers::helpers as dg_helpers;
 use crate::helpers::{self, parse_unsigned_integer};
 use crate::icao9303::DocumentHashAlgorithm;
