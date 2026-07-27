@@ -1,10 +1,13 @@
+use crate::dg_parsers::generic::dumper as generic_dumper;
 use crate::dg_parsers::helpers as dg_helpers;
 use crate::helpers;
 use crate::types;
 use iso7816_tlv::ber;
-#[cfg(feature = "cli")]
-use simplelog::info;
-use simplelog::{debug, warn};
+use simplelog::{debug, info, warn};
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 
 impl types::EFDG11 {
     #[cfg(feature = "cli")]
@@ -77,4 +80,42 @@ pub fn parser(
         result.fancy_print(data_group);
     }
     return Some(types::ParsedDataGroup::EFDG11(result));
+}
+
+/// Write the file out, plus any image it carries.
+///
+/// DG11 can carry a scan proving citizenship, which is otherwise
+/// only visible as a byte count.
+pub fn dumper(
+    file_data: &Vec<u8>,
+    parsed_data: &Option<types::ParsedDataGroup>,
+    base_path: &Path,
+    base_filename: &String,
+) -> Result<Vec<PathBuf>, io::Error> {
+    let mut written = generic_dumper(file_data, parsed_data, base_path, &base_filename)?;
+
+    let parsed = match parsed_data {
+        Some(types::ParsedDataGroup::EFDG11(parsed)) => parsed,
+        // Nothing parsed, so there is nothing to pull an image out of.
+        _ => return Ok(written),
+    };
+
+    for (name, image) in [("proof-of-citizenship", &parsed.proof_of_citizenship)] {
+        let image = match image {
+            Some(image) => image,
+            None => continue,
+        };
+        let mut file_path = base_path.join(format!("{}-{}", base_filename, name));
+        // ICAO 9303 p10 has these as JPEG.
+        file_path.set_extension("jpeg");
+
+        crate::dg_parsers::generic::write_file(&file_path, image)?;
+
+        info!(
+            "<magenta>Saved image to {}</>",
+            &file_path.to_string_lossy()
+        );
+        written.push(file_path);
+    }
+    return Ok(written);
 }

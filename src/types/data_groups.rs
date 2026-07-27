@@ -212,7 +212,7 @@ pub static DATA_GROUPS: [DataGroup; 22] = [
         eac_only: false,
         in_lds1: true,
         parser: dg_parsers::ef_dg11::parser,
-        dumper: dg_parsers::generic::dumper,
+        dumper: dg_parsers::ef_dg11::dumper,
         is_binary: false,
     },
     DataGroup {
@@ -225,7 +225,7 @@ pub static DATA_GROUPS: [DataGroup; 22] = [
         eac_only: false,
         in_lds1: true,
         parser: dg_parsers::ef_dg12::parser,
-        dumper: dg_parsers::generic::dumper,
+        dumper: dg_parsers::ef_dg12::dumper,
         is_binary: false,
     },
     DataGroup {
