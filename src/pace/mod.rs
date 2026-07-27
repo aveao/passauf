@@ -94,18 +94,41 @@ impl PendingChipAuthentication {
     /// It says nothing about whether that key is itself trustworthy, which is
     /// what Passive Authentication is for.
     pub fn verify(&self, public_key: &[u8]) -> bool {
+        // Everything needed to redo this check by hand, since a mismatch is
+        // otherwise impossible to tell apart from a wrong key.
+        debug!(
+            "CA.IC (decrypted chip authentication data): {:02x?}",
+            self.chip_authentication_data
+        );
+        debug!("PK.IC (static key being checked): {:02x?}", public_key);
+        debug!(
+            "PK.Map,IC (chip's mapping key): {:02x?}",
+            self.chip_mapping_public_key
+        );
+
         let ops = match ecdh::ops_for(self.curve) {
             Some(ops) => ops,
             None => return false,
         };
         // Reject a key that isn't even on the curve before multiplying by it.
         if !ops.validate_point(public_key) {
+            debug!("PK.IC is not a point on {}.", self.curve);
             return false;
         }
-        return match ops.multiply(public_key, &self.chip_authentication_data) {
-            Some(result) => result == self.chip_mapping_public_key,
-            None => false,
+        let product = match ops.multiply(public_key, &self.chip_authentication_data) {
+            Some(product) => product,
+            None => {
+                debug!(
+                    "Could not compute CA.IC * PK.IC. CA.IC is {} bytes, and a scalar on {} is {}.",
+                    self.chip_authentication_data.len(),
+                    self.curve,
+                    ops.field_size()
+                );
+                return false;
+            }
         };
+        debug!("CA.IC * PK.IC: {:02x?}", product);
+        return product == self.chip_mapping_public_key;
     }
 
     pub fn curve(&self) -> EcCurve {
@@ -540,6 +563,10 @@ pub fn do_pace_authentication(
                             .to_string(),
                     )
                 })?;
+            debug!(
+                "A.IC (encrypted chip authentication data): {:02x?}",
+                encrypted
+            );
             let chip_authentication_data = sm
                 .decrypt_chip_authentication_data(encrypted)
                 .ok_or_else(|| {
