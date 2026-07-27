@@ -71,6 +71,20 @@ pub struct EFDG7 {
     pub displayed_signatures: Vec<Vec<u8>>,
 }
 
+/// One data group's expected hash, as EF.SOD records it.
+#[derive(Debug)]
+pub struct DataGroupHash {
+    pub data_group_number: u64,
+    pub hash: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub struct EFSOD {
+    // ICAO 9303 part 10, edition 8, 4.6.2
+    pub hash_algorithm: crate::icao9303::DocumentHashAlgorithm,
+    pub data_group_hashes: Vec<DataGroupHash>,
+}
+
 #[cfg(feature = "pace")]
 #[derive(Debug)]
 pub struct EFCardSecurity {
@@ -133,6 +147,7 @@ pub struct EFDG12 {
 #[derive(Debug)]
 pub enum ParsedDataGroup {
     EFCom(EFCom),
+    EFSOD(EFSOD),
     #[cfg(feature = "pace")]
     EFCardAccess(crate::types::ef_cardaccess::EFCardAccess),
     #[cfg(feature = "pace")]

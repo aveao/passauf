@@ -68,6 +68,84 @@ pub fn tdes_dec(key: &[u8], data: &[u8]) -> Vec<u8> {
         .unwrap();
 }
 
+/// The digest algorithms ICAO 9303 allows for the Document Security Object.
+///
+/// EF.SOD names one by OID and hashes every data group with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentHashAlgorithm {
+    Sha1,
+    Sha224,
+    Sha256,
+    Sha384,
+    Sha512,
+}
+
+impl DocumentHashAlgorithm {
+    /// Resolve a digest from the DER value bytes of its object identifier.
+    ///
+    /// Returns None for anything we cannot compute, so a caller refuses rather
+    /// than comparing against the wrong digest.
+    pub fn from_oid_bytes(oid_bytes: &[u8]) -> Option<DocumentHashAlgorithm> {
+        return Some(match oid_bytes {
+            // 1.3.14.3.2.26
+            [0x2B, 0x0E, 0x03, 0x02, 0x1A] => DocumentHashAlgorithm::Sha1,
+            // 2.16.840.1.101.3.4.2.x
+            [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x04] => DocumentHashAlgorithm::Sha224,
+            [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01] => DocumentHashAlgorithm::Sha256,
+            [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02] => DocumentHashAlgorithm::Sha384,
+            [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03] => DocumentHashAlgorithm::Sha512,
+            _ => return None,
+        });
+    }
+
+    /// Hash data with this algorithm.
+    pub fn hash(&self, data: &[u8]) -> Vec<u8> {
+        return match self {
+            DocumentHashAlgorithm::Sha1 => {
+                let mut hasher = Sha1::new();
+                hasher.update(data);
+                hasher.finalize().to_vec()
+            }
+            DocumentHashAlgorithm::Sha224 => {
+                let mut hasher = sha2::Sha224::new();
+                hasher.update(data);
+                hasher.finalize().to_vec()
+            }
+            DocumentHashAlgorithm::Sha256 => {
+                let mut hasher = sha2::Sha256::new();
+                hasher.update(data);
+                hasher.finalize().to_vec()
+            }
+            DocumentHashAlgorithm::Sha384 => {
+                let mut hasher = sha2::Sha384::new();
+                hasher.update(data);
+                hasher.finalize().to_vec()
+            }
+            DocumentHashAlgorithm::Sha512 => {
+                let mut hasher = sha2::Sha512::new();
+                hasher.update(data);
+                hasher.finalize().to_vec()
+            }
+        };
+    }
+}
+
+impl std::fmt::Display for DocumentHashAlgorithm {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        return write!(
+            f,
+            "{}",
+            match self {
+                DocumentHashAlgorithm::Sha1 => "SHA-1",
+                DocumentHashAlgorithm::Sha224 => "SHA-224",
+                DocumentHashAlgorithm::Sha256 => "SHA-256",
+                DocumentHashAlgorithm::Sha384 => "SHA-384",
+                DocumentHashAlgorithm::Sha512 => "SHA-512",
+            }
+        );
+    }
+}
+
 /// Calculates E.IFD and M.IFD for BAC
 ///
 /// Returns K.enc, E.ifd and M.ifd

@@ -24,6 +24,32 @@ pub fn asn1_parse_len(data: Vec<u8>) -> (u8, u32) {
     return result;
 }
 
+/// Read an INTEGER's value as an unsigned integer.
+///
+/// Returns None for negative or oversized values, neither of which any field
+/// we read here is allowed to be.
+pub fn parse_unsigned_integer(tlv: &ber::Tlv) -> Option<u64> {
+    let value_bytes = get_tlv_value_bytes(tlv);
+    if value_bytes.is_empty() {
+        return None;
+    }
+    // DER pads with a leading zero to keep a high bit from meaning negative.
+    let significant = match value_bytes[0] {
+        0x00 => &value_bytes[1..],
+        // A set high bit without that padding means the value is negative.
+        0x80..=0xFF => return None,
+        _ => &value_bytes[..],
+    };
+    if significant.len() > 8 {
+        return None;
+    }
+    let mut result: u64 = 0;
+    for byte in significant {
+        result = (result << 8) | u64::from(*byte);
+    }
+    return Some(result);
+}
+
 /// Encode a BER-TLV from raw tag bytes and a value.
 ///
 /// iso7816_tlv refuses to build a constructed tag around an opaque value, but

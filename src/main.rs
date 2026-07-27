@@ -73,7 +73,7 @@ struct CliArgs {
 /// A pass proves the chip holds the private key for the Chip Authentication key
 /// it presented. It does not prove that key belongs to a genuine document:
 /// ICAO 9303 p11 section 4.4.3.5.2 requires Passive Authentication alongside
-/// CAM for that, and passauf does not validate EF.SOD yet.
+/// CAM for that, and while EF.SOD's hashes are checked, its signature is not.
 #[cfg(feature = "pace")]
 fn verify_chip_authentication(
     pending: &pace::PendingChipAuthentication,
@@ -113,6 +113,70 @@ fn verify_chip_authentication(
         keys.len()
     );
     return false;
+}
+
+/// Hold one data group's contents against the hash EF.SOD records for it.
+///
+/// Returns None when EF.SOD says nothing about this data group, which is not an
+/// error in itself but does mean nothing was checked.
+fn check_data_group_hash(
+    security_object: &types::EFSOD,
+    dg_info: &types::DataGroup,
+    file_data: &[u8],
+) -> Option<bool> {
+    let expected = security_object
+        .data_group_hashes
+        .iter()
+        .find(|data_group_hash| data_group_hash.data_group_number == u64::from(dg_info.dg_num))?;
+
+    // The hash covers the file exactly as read, outer tag included.
+    let actual = security_object.hash_algorithm.hash(file_data);
+    if actual == expected.hash {
+        info!(
+            "<green>{} matches its {} hash in EF.SOD.</>",
+            dg_info.name, security_object.hash_algorithm
+        );
+        return Some(true);
+    }
+
+    error!(
+        "<red>{} does NOT match its hash in EF.SOD.</> Expected {}, got {}.",
+        dg_info.name,
+        expected
+            .hash
+            .iter()
+            .map(|byte| format!("{:02x}", byte))
+            .collect::<String>(),
+        actual
+            .iter()
+            .map(|byte| format!("{:02x}", byte))
+            .collect::<String>()
+    );
+    return Some(false);
+}
+
+/// Report where EF.COM's file list and EF.SOD's hash list disagree.
+///
+/// EF.SOD is signed and EF.COM is not, so EF.COM listing fewer data groups than
+/// EF.SOD covers is the interesting direction: it is what removing a data group
+/// from a document would look like to a reader that trusts EF.COM.
+fn data_groups_missing_from_ef_com(
+    ef_com: &types::EFCom,
+    security_object: &types::EFSOD,
+) -> Vec<u64> {
+    let mut missing: Vec<u64> = vec![];
+    for data_group_hash in security_object.data_group_hashes.iter() {
+        let dg_info = types::DATA_GROUPS.iter().find(|dg_info| {
+            dg_info.in_lds1 && u64::from(dg_info.dg_num) == data_group_hash.data_group_number
+        });
+        match dg_info {
+            Some(dg_info) if !ef_com.data_group_tag_list.contains(&dg_info.tag) => {
+                missing.push(data_group_hash.data_group_number)
+            }
+            _ => continue,
+        }
+    }
+    return missing;
 }
 
 fn main() {
@@ -351,9 +415,44 @@ fn main() {
         }
     };
 
+    // Read EF.SOD, which records a hash of every data group. It is not itself
+    // listed in EF.COM's tag list, so it has to be asked for by name.
+    let (_, _, parse_result) = helpers::secure_read_file_by_name(
+        &mut smartcard,
+        DataGroupEnum::EFSod,
+        &filename_distinguisher,
+        &args.dump_path,
+        Some(&mut sm),
+    );
+    let security_object = match parse_result {
+        Some(types::ParsedDataGroup::EFSOD(security_object)) => Some(security_object),
+        _ => {
+            warn!("Could not read EF.SOD, so data group hashes cannot be checked.");
+            None
+        }
+    };
+
+    // EF.SOD covers the data groups but not EF.COM, so the two can disagree
+    // about which are present. Saying so is worthwhile: EF.COM is what the read
+    // loop below trusts.
+    if let Some(ref security_object) = security_object {
+        for data_group_number in data_groups_missing_from_ef_com(&ef_com_file, security_object) {
+            warn!(
+                "EF.SOD covers DG{} but EF.COM does not list it, so it will not be read. \
+                 EF.COM is not covered by EF.SOD, so an entry removed from it cannot be \
+                 detected by EF.SOD's signature.",
+                data_group_number
+            );
+        }
+    }
+
+    let mut hashes_checked: Vec<u64> = vec![];
+    let mut hashes_mismatched: Vec<u64> = vec![];
+
     // read all files under the LDS1 file
     for dg_info in types::DATA_GROUPS.iter() {
         if dg_info.name == "EF.COM"
+            || dg_info.name == "EF.SOD"
             || !dg_info.in_lds1
             || dg_info.pace_only
             || (dg_info.is_binary && args.dump_path.is_none())
@@ -362,15 +461,27 @@ fn main() {
             continue;
         }
 
-        // Only the PACE-CAM check below looks at what came back.
         #[cfg_attr(not(feature = "pace"), allow(unused_variables))]
-        let (_, parsed_data) = helpers::secure_read_file(
+        let (file_read, parsed_data) = helpers::secure_read_file(
             &mut smartcard,
             dg_info,
             &filename_distinguisher,
             &args.dump_path,
             Some(&mut sm),
         );
+
+        // Hash what was actually read and hold it against EF.SOD.
+        if let (Some(ref security_object), Some(ref file_data)) = (&security_object, &file_read) {
+            match check_data_group_hash(security_object, dg_info, file_data) {
+                Some(true) => hashes_checked.push(dg_info.dg_num.into()),
+                Some(false) => {
+                    hashes_checked.push(dg_info.dg_num.into());
+                    hashes_mismatched.push(dg_info.dg_num.into());
+                }
+                // EF.SOD says nothing about this data group.
+                None => {}
+            }
+        }
 
         // DG14 carries the chip's static Chip Authentication key, which is what
         // a pending PACE-CAM check has been waiting for.
@@ -403,7 +514,170 @@ fn main() {
         );
     }
 
-    // TODO: Read EF_SOD and compare hashes of files
+    // Summarize what the hash check established.
+    if security_object.is_some() {
+        if hashes_checked.is_empty() {
+            warn!("No data group hashes could be checked against EF.SOD.");
+        } else if hashes_mismatched.is_empty() {
+            info!(
+                "<green>All {} data group hashes match EF.SOD.</>",
+                hashes_checked.len()
+            );
+            info!(
+                "<d>Note: EF.SOD's own signature is not verified, so this shows the document is \
+                 internally consistent, not that it is genuine.</>"
+            );
+        } else {
+            error!(
+                "<red>{} of {} data groups do NOT match EF.SOD</> (DG{}). The document has been \
+                 altered, or was read incorrectly.",
+                hashes_mismatched.len(),
+                hashes_checked.len(),
+                hashes_mismatched
+                    .iter()
+                    .map(|number| number.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", DG")
+            );
+        }
+
+        // Anything EF.SOD covers that we never read stays unchecked.
+        if let Some(ref security_object) = security_object {
+            let unchecked: Vec<String> = security_object
+                .data_group_hashes
+                .iter()
+                .filter(|data_group_hash| {
+                    !hashes_checked.contains(&data_group_hash.data_group_number)
+                })
+                .map(|data_group_hash| format!("DG{}", data_group_hash.data_group_number))
+                .collect();
+            if !unchecked.is_empty() {
+                info!(
+                    "<d>Not checked, as they were not read: {}.</>",
+                    unchecked.join(", ")
+                );
+            }
+        }
+    }
 
     drop(smartcard);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::icao9303::DocumentHashAlgorithm;
+    use crate::types::parsed_data_groups::DataGroupHash;
+
+    fn security_object(
+        hash_algorithm: DocumentHashAlgorithm,
+        hashes: Vec<(u64, Vec<u8>)>,
+    ) -> types::EFSOD {
+        return types::EFSOD {
+            hash_algorithm,
+            data_group_hashes: hashes
+                .into_iter()
+                .map(|(data_group_number, hash)| DataGroupHash {
+                    data_group_number,
+                    hash,
+                })
+                .collect(),
+        };
+    }
+
+    fn data_group(name: &str) -> &'static types::DataGroup {
+        return types::DATA_GROUPS
+            .iter()
+            .find(|dg_info| dg_info.name == name)
+            .unwrap();
+    }
+
+    /// A data group whose contents hash to the value EF.SOD records passes.
+    #[test]
+    fn matching_hash_passes() {
+        let contents = b"a data group, as read off the chip";
+        let expected = DocumentHashAlgorithm::Sha256.hash(contents);
+        let sod = security_object(DocumentHashAlgorithm::Sha256, vec![(1, expected)]);
+
+        assert_eq!(
+            check_data_group_hash(&sod, data_group("EF.DG1"), contents),
+            Some(true)
+        );
+    }
+
+    /// A single altered byte has to be caught, which is the whole point.
+    #[test]
+    fn altered_contents_fail() {
+        let contents = b"a data group, as read off the chip";
+        let expected = DocumentHashAlgorithm::Sha256.hash(contents);
+        let sod = security_object(DocumentHashAlgorithm::Sha256, vec![(1, expected)]);
+
+        let mut tampered = contents.to_vec();
+        tampered[0] ^= 0x01;
+        assert_eq!(
+            check_data_group_hash(&sod, data_group("EF.DG1"), &tampered),
+            Some(false)
+        );
+    }
+
+    /// A data group EF.SOD says nothing about is reported as unchecked rather
+    /// than as a pass, so it cannot be counted as verified.
+    #[test]
+    fn a_data_group_absent_from_the_security_object_is_unchecked() {
+        let sod = security_object(DocumentHashAlgorithm::Sha256, vec![(1, vec![0u8; 32])]);
+        assert_eq!(
+            check_data_group_hash(&sod, data_group("EF.DG2"), b"anything"),
+            None
+        );
+    }
+
+    /// The hash algorithm comes from EF.SOD, so an older SHA-1 document works
+    /// the same way.
+    #[test]
+    fn honours_the_algorithm_the_document_names() {
+        let contents = b"a data group";
+        let sod = security_object(
+            DocumentHashAlgorithm::Sha1,
+            vec![(1, DocumentHashAlgorithm::Sha1.hash(contents))],
+        );
+        assert_eq!(
+            check_data_group_hash(&sod, data_group("EF.DG1"), contents),
+            Some(true)
+        );
+
+        // The same contents under the wrong algorithm must not pass.
+        let wrong = security_object(
+            DocumentHashAlgorithm::Sha256,
+            vec![(1, DocumentHashAlgorithm::Sha1.hash(contents))],
+        );
+        assert_eq!(
+            check_data_group_hash(&wrong, data_group("EF.DG1"), contents),
+            Some(false)
+        );
+    }
+
+    /// EF.COM is not covered by EF.SOD's signature, so a data group dropped
+    /// from its list would otherwise go unnoticed.
+    #[test]
+    fn spots_data_groups_missing_from_ef_com() {
+        let sod = security_object(
+            DocumentHashAlgorithm::Sha256,
+            vec![(1, vec![0u8; 32]), (2, vec![0u8; 32])],
+        );
+        // EF.COM lists only DG1 (tag 0x61), while EF.SOD covers DG1 and DG2.
+        let ef_com = types::EFCom {
+            lds_version: None,
+            unicode_version: None,
+            data_group_tag_list: vec![0x61],
+        };
+        assert_eq!(data_groups_missing_from_ef_com(&ef_com, &sod), vec![2]);
+
+        // With both listed, nothing is missing.
+        let ef_com = types::EFCom {
+            lds_version: None,
+            unicode_version: None,
+            data_group_tag_list: vec![0x61, 0x75],
+        };
+        assert!(data_groups_missing_from_ef_com(&ef_com, &sod).is_empty());
+    }
 }

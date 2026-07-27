@@ -7,7 +7,7 @@
 use iso7816_tlv::ber;
 use simplelog::{debug, warn};
 
-use crate::helpers;
+use crate::helpers::{self, parse_unsigned_integer};
 use crate::types::ef_cardaccess::{format_oid, ChipAuthenticationPublicKeyInfo};
 
 /// DER tags used inside SecurityInfos.
@@ -21,32 +21,6 @@ pub const TAG_BIT_STRING: u16 = 0x03;
 const OID_PK_ECDH: [u8; 9] = [0x04, 0x00, 0x7F, 0x00, 0x07, 0x02, 0x02, 0x01, 0x02];
 /// id-PK-DH, `0.4.0.127.0.7.2.2.1.1`.
 const OID_PK_DH: [u8; 9] = [0x04, 0x00, 0x7F, 0x00, 0x07, 0x02, 0x02, 0x01, 0x01];
-
-/// Read an INTEGER's value as an unsigned integer.
-///
-/// Returns None for negative or oversized values, neither of which any field
-/// we read here is allowed to be.
-pub fn parse_unsigned_integer(tlv: &ber::Tlv) -> Option<u64> {
-    let value_bytes = helpers::get_tlv_value_bytes(tlv);
-    if value_bytes.is_empty() {
-        return None;
-    }
-    // DER pads with a leading zero to keep a high bit from meaning negative.
-    let significant = match value_bytes[0] {
-        0x00 => &value_bytes[1..],
-        // A set high bit without that padding means the value is negative.
-        0x80..=0xFF => return None,
-        _ => &value_bytes[..],
-    };
-    if significant.len() > 8 {
-        return None;
-    }
-    let mut result: u64 = 0;
-    for byte in significant {
-        result = (result << 8) | u64::from(*byte);
-    }
-    return Some(result);
-}
 
 /// Parse a ChipAuthenticationPublicKeyInfo.
 ///
