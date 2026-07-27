@@ -553,6 +553,10 @@ where
         ..Default::default()
     };
 
+    if security_object.is_some() {
+        mark_files_read_before_the_security_object(&mut files);
+    }
+
     // EF.SOD covers the data groups but not EF.COM, so the two can disagree
     // about which are present. Saying so is worthwhile: EF.COM is what the read
     // loop below trusts.
@@ -794,6 +798,22 @@ fn check_data_group_hash(
     };
 }
 
+/// Correct the reason the files read before EF.SOD went unchecked.
+///
+/// EF.CardAccess, EF.DIR, EF.COM and EF.SOD itself are all read before there is
+/// a security object to hold anything against, so each one is left saying it
+/// was not checked because EF.SOD was not read. Once EF.SOD *has* been read,
+/// that reads as a contradiction next to the data groups reporting matches.
+/// None of them is a data group, and EF.SOD records no hash for any of them, so
+/// the honest reason is that it does not cover them.
+fn mark_files_read_before_the_security_object(files: &mut [FileRead]) {
+    for file in files.iter_mut() {
+        if file.hash == HashCheck::NoSecurityObject {
+            file.hash = HashCheck::NotCovered;
+        }
+    }
+}
+
 /// Report where EF.COM's file list and EF.SOD's hash list disagree.
 ///
 /// EF.SOD is signed and EF.COM is not, so EF.COM listing fewer data groups than
@@ -930,6 +950,44 @@ mod tests {
             check_data_group_hash(&wrong, named_data_group("EF.DG1"), contents),
             HashCheck::Mismatch { .. }
         ));
+    }
+
+    /// The files read before EF.SOD must not go on claiming it was never read,
+    /// which sits badly next to the data groups underneath them reporting
+    /// matches against it.
+    #[test]
+    fn files_read_before_the_security_object_are_reported_as_uncovered() {
+        fn file(name: &'static str, hash: HashCheck) -> FileRead {
+            return FileRead {
+                name,
+                description: "",
+                file_id: 0,
+                data: Some(vec![]),
+                parsed: None,
+                hash,
+                dumped: vec![],
+            };
+        }
+
+        let mut files = vec![
+            file("EF.CardAccess", HashCheck::NoSecurityObject),
+            file("EF.COM", HashCheck::NoSecurityObject),
+            file("EF.DG1", HashCheck::Matches),
+            file(
+                "EF.DG2",
+                HashCheck::Mismatch {
+                    expected: vec![1],
+                    actual: vec![2],
+                },
+            ),
+        ];
+        mark_files_read_before_the_security_object(&mut files);
+
+        assert_eq!(files[0].hash, HashCheck::NotCovered);
+        assert_eq!(files[1].hash, HashCheck::NotCovered);
+        // A real outcome is never overwritten.
+        assert_eq!(files[2].hash, HashCheck::Matches);
+        assert!(matches!(files[3].hash, HashCheck::Mismatch { .. }));
     }
 
     /// A document can publish its Chip Authentication key in EF.CardSecurity,
