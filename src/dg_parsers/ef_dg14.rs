@@ -212,6 +212,11 @@ mod tests {
             .collect();
     }
 
+    /// Build the SEC1 encoding of a point from its two coordinates.
+    fn point(x: &str, y: &str) -> Vec<u8> {
+        return vec![vec![0x04], hex(x), hex(y)].concat();
+    }
+
     fn parse(data: Vec<u8>) -> types::EFDG14 {
         let data_group = &types::DATA_GROUPS[types::DataGroupEnum::EFDg14 as usize];
         match parser(&data, data_group, false).unwrap() {
@@ -252,6 +257,60 @@ mod tests {
             )
         );
         // And it has to be a real point on the curve it names.
+        let ops =
+            crate::pace::ecdh::ops_for(crate::pace::domain::EcCurve::BrainpoolP256r1).unwrap();
+        assert!(ops.validate_point(&key.public_key));
+    }
+
+    /// A chip may spell its curve out as explicit domain parameters rather
+    /// than naming a standardized one, in which case there is no parameter ID
+    /// to report. The key itself must still come out intact, since that is all
+    /// a PACE-CAM check needs.
+    #[test]
+    fn parses_a_key_with_explicit_domain_parameters() {
+        use crate::helpers::encode_ber;
+
+        // ECParameters spelled out, rather than a standardized parameter ID.
+        // Only its shape matters here: the INTEGERs sit one level deeper than a
+        // parameter ID would, so none is directly beside the OID.
+        let ec_parameters = encode_ber(&[0x30], &hex("020101020101"));
+        let algorithm_identifier = encode_ber(
+            &[0x30],
+            &vec![encode_ber(&[0x06], &hex("2A8648CE3D0201")), ec_parameters].concat(),
+        );
+        // The BIT STRING's leading 0x00 counts unused trailing bits.
+        let subject_public_key = encode_ber(
+            &[0x03],
+            &vec![
+                hex("00"),
+                point(
+                    "1872709494399E7470A6431BE25E83EEE24FEA568C2ED28DB48E05DB3A610DC8",
+                    "84D256A40E35EFCB59BF6753D3A489D28C7A4D973C2DA138A6E7A4A08F68E16F",
+                ),
+            ]
+            .concat(),
+        );
+        let subject_public_key_info = encode_ber(
+            &[0x30],
+            &vec![algorithm_identifier, subject_public_key].concat(),
+        );
+        let key_info = encode_ber(
+            &[0x30],
+            &vec![
+                encode_ber(&[0x06], &hex("04007F000702020102")),
+                subject_public_key_info,
+            ]
+            .concat(),
+        );
+        let dg14 = encode_ber(&[0x6E], &encode_ber(&[0x31], &key_info));
+
+        let parsed = parse(dg14);
+        assert_eq!(parsed.chip_authentication_public_keys.len(), 1);
+        let key = &parsed.chip_authentication_public_keys[0];
+
+        // No standardized parameter ID, but the key is there and usable.
+        assert_eq!(key.parameter_id, None);
+        assert_eq!(key.public_key.len(), 65);
         let ops =
             crate::pace::ecdh::ops_for(crate::pace::domain::EcCurve::BrainpoolP256r1).unwrap();
         assert!(ops.validate_point(&key.public_key));

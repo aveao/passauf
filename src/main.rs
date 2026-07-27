@@ -77,30 +77,21 @@ fn verify_chip_authentication(
     pending: &pace::PendingChipAuthentication,
     dg14: &types::EFDG14,
 ) -> bool {
-    let matching_keys: Vec<_> = dg14
-        .chip_authentication_public_keys
-        .iter()
-        // A chip may hold several keys; only those on the curve PACE ran over
-        // can possibly match.
-        .filter(|key_info| {
-            key_info.parameter_id.and_then(pace::domain::from_parameter_id).is_some_and(
-                |parameter| {
-                    matches!(parameter, pace::domain::DomainParameter::Ec(curve) if curve == pending.curve())
-                },
-            )
-        })
-        .collect();
-
-    if matching_keys.is_empty() {
+    if dg14.chip_authentication_public_keys.is_empty() {
         warn!(
-            "Chip Authentication Mapping was used, but DG14 offers no public key on {}, \
-             so the chip's genuineness is unverified.",
-            pending.curve()
+            "Chip Authentication Mapping was used, but DG14 offers no chip authentication \
+             public key, so the chip's genuineness is unverified."
         );
         return false;
     }
 
-    for key_info in matching_keys {
+    // A chip may hold several keys, so simply try each. Filtering by the
+    // domain parameter ID first would be wrong: a chip is free to spell its
+    // curve out as explicit domain parameters instead of naming a standardized
+    // one, and then there is no ID to compare. verify() validates the point
+    // against the curve PACE ran over anyway, so a key that belongs to some
+    // other curve is rejected there.
+    for key_info in dg14.chip_authentication_public_keys.iter() {
         if pending.verify(&key_info.public_key) {
             info!(
                 "<green>Chip Authentication passed</> (the chip holds the private key for its \
