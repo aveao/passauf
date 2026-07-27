@@ -11,7 +11,7 @@ mod smartcard_abstractions;
 mod types;
 
 use clap::Parser;
-use simplelog::{info, warn, CombinedLogger, TermLogger};
+use simplelog::{error, info, warn, CombinedLogger, TermLogger};
 use smartcard_abstractions::ReaderInterface;
 use std::path::PathBuf;
 use types::DataGroupEnum;
@@ -133,6 +133,14 @@ fn main() {
     )])
     .unwrap();
 
+    // A CAN is only usable through PACE, so without it there is no point
+    // touching a reader at all. Say so before the user goes looking for a card.
+    if args.card_access_number.is_some() && !cfg!(feature = "pace") {
+        error!("<red>--can needs PACE, but this build of passauf has no PACE support</> (the `pace` feature was disabled at compile time).");
+        error!("Rebuild with the `pace` feature, which is enabled by default, or authenticate with --num, --dob and --doe instead.");
+        std::process::exit(1);
+    }
+
     let filename_distinguisher = match args.document_number.as_ref() {
         Some(document_number) => document_number,
         None => &helpers::unix_time().to_string(),
@@ -151,7 +159,7 @@ fn main() {
 
     // Read EF.CardAccess. Only PACE has any use for what's in it.
     #[cfg_attr(not(feature = "pace"), allow(unused_variables))]
-    let (_, _, parsed_card_access) = helpers::read_file_by_name(
+    let (_, card_access_file, parsed_card_access) = helpers::read_file_by_name(
         &mut smartcard,
         DataGroupEnum::EFCardAccess,
         &filename_distinguisher,
@@ -170,11 +178,28 @@ fn main() {
     let pace_available = card_access
         .as_ref()
         .map_or(false, |card_access| card_access.supports_pace());
+    // Without the feature there is no parser for EF.CardAccess, so we cannot
+    // tell what the document offers, only that we cannot use it.
     #[cfg(not(feature = "pace"))]
     let pace_available = false;
 
     if !pace_available {
-        warn!("PACE isn't available on this eMRTD. Will authenticate with BAC.");
+        // Both arms compile either way, so this stays one readable block.
+        if cfg!(feature = "pace") {
+            warn!("PACE isn't available on this eMRTD. Will authenticate with BAC.");
+        } else if card_access_file.is_some() {
+            // EF.CardAccess exists purely to carry PACE parameters, so a
+            // document that has one almost certainly supports PACE. Blaming the
+            // document here would send the user looking in the wrong place.
+            warn!("<red>This build of passauf has no PACE support</> (the `pace` feature was disabled at compile time).");
+            warn!(
+                "This eMRTD has an EF.CardAccess, so it almost certainly does support PACE. \
+                 Rebuild with the `pace` feature, which is enabled by default, to use it."
+            );
+            warn!("Falling back to BAC, which will fail outright if this document is PACE-only.");
+        } else {
+            warn!("PACE isn't available on this eMRTD. Will authenticate with BAC.");
+        }
     }
 
     // Read all files under the master file
@@ -256,9 +281,11 @@ fn main() {
         }
         None => {
             if args.card_access_number.is_some() {
+                // A CAN is only ever usable through PACE, so there is nothing
+                // to fall back to.
                 panic!(
-                    "PACE did not succeed and BAC needs the document number, date of birth \
-                     and date of expiry, which a CAN cannot substitute for."
+                    "PACE did not succeed, and a CAN cannot be used with BAC, which needs the \
+                     document number, date of birth and date of expiry instead."
                 );
             }
             if pace_available {
@@ -300,6 +327,8 @@ fn main() {
             continue;
         }
 
+        // Only the PACE-CAM check below looks at what came back.
+        #[cfg_attr(not(feature = "pace"), allow(unused_variables))]
         let (_, parsed_data) = helpers::secure_read_file(
             &mut smartcard,
             dg_info,
