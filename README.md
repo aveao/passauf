@@ -1,6 +1,6 @@
 # passauf
 
-Passauf is a Rust tool that lets you read eMRTDs¹ using a standard contactless reader (\<todo) or using a Proxmark 3. It supports BAC¹, and I plan to support PACE¹ soon.
+Passauf is a Rust tool that lets you read eMRTDs¹ using a standard contactless reader (\<todo) or using a Proxmark 3. It supports BAC¹ and PACE¹.
 
 ![](https://elixi.re/i/7vim01so3o.png)
 
@@ -38,7 +38,9 @@ Here's a relatively complete example showing all main flags in use:
 passauf -n A123B234 -b 030201 -e 350212 --dump /tmp --backend proxmark --reader /dev/ttyACM0
 ```
 
-At this time, PACE isn't implemented, so you cannot use `--can`.
+PACE is used automatically when the document offers a variant passauf supports, falling back to BAC otherwise. `--can` uses the Card Access Number instead of the MRZ, which only works on documents that offer PACE.
+
+See [Supported PACE algorithms](#supported-pace-algorithms) for what is and isn't implemented.
 
 ## High-level overview of what this project does
 
@@ -49,7 +51,7 @@ Accessing an eMRTD works like so:
 - For application protocol, we use ISO/IEC 7816-4¹. This lets us use standardized commands (APDUs¹).
 - We read the `EF.CardAccess` file if it is available, which contains the parameters for PACE and other types of authentication (Terminal Authentication, etc).
     - We parse this file using ASN.1.
-- If it's not available, we attempt BAC, else we attempt PACE.
+- If it offers a PACE variant we support, we attempt PACE, and otherwise fall back to BAC.
     - This requires us to know either all of document's expiry, date of birth and document number, or in case of PACE, alternatively the CAN¹.
     - For BAC, this is a "three-pass challenge-response protocol according to [ISO/IEC 11770-2] Key Establishment Mechanism 6 using 3DES [FIPS 46-3] as block cipher."
     - PACE is designed to be more secure, uses asymmetric crypto and lets documents support a number of algorithms. This makes it take more work to support it.
@@ -71,6 +73,70 @@ Helpful links from my last implementation:
 So far I only plan to support LDS1, but if I find any eMRTDs supporting LDS2 I may look into it.
 
 ¹: See Terminology section in infodump.md.
+
+## Supported PACE algorithms
+
+A PACE variant is a combination of a key agreement, a mapping, a cipher and a set of domain parameters. The document lists the combinations it accepts in `EF.CardAccess`, and passauf picks the first one it can run. If none of them are supported, it says which ones it saw and why each was rejected, then falls back to BAC where that is possible.
+
+### Mappings
+
+| Mapping | Supported | Notes |
+| --- | --- | --- |
+| Generic Mapping (GM) | Yes | |
+| Integrated Mapping (IM) | Yes | |
+| Chip Authentication Mapping (CAM) | No | Recognized and reported, but not performed. It folds Chip Authentication into PACE, which passauf does not implement yet. |
+
+### Key agreement and ciphers
+
+| | Supported |
+| --- | --- |
+| ECDH | Yes |
+| DH | Yes |
+| 3DES-CBC-CBC | Yes |
+| AES-CBC-CMAC-128 | Yes |
+| AES-CBC-CMAC-192 | Yes |
+| AES-CBC-CMAC-256 | Yes |
+
+Both passwords are supported: the MRZ (document number, date of birth and date of expiry) and the CAN.
+
+### Standardized domain parameters
+
+These are the parameter IDs of ICAO 9303 part 11, section 9.5.1.
+
+| ID | Parameters | Supported | Reason |
+| --- | --- | --- | --- |
+| 0 | 1024-bit MODP group, 160-bit subgroup | Yes | |
+| 1 | 2048-bit MODP group, 224-bit subgroup | Yes | |
+| 2 | 2048-bit MODP group, 256-bit subgroup | Yes | |
+| 3–7 | — | — | Reserved for future use by the standard. |
+| 8 | NIST P-192 | No | No Rust implementation available. |
+| 9 | BrainpoolP192r1 | No | No Rust implementation available. |
+| 10 | NIST P-224 | No | No Rust implementation available. Also barred from the Integrated Mapping by the standard, as its point encoding needs `p ≡ 3 mod 4`. |
+| 11 | BrainpoolP224r1 | No | No Rust implementation available. |
+| 12 | NIST P-256 | Yes | |
+| 13 | BrainpoolP256r1 | Yes | The one German IDs use. |
+| 14 | BrainpoolP320r1 | No | No Rust implementation available. |
+| 15 | NIST P-384 | Yes | |
+| 16 | BrainpoolP384r1 | Yes | |
+| 17 | BrainpoolP512r1 | No | No Rust implementation available. |
+| 18 | NIST P-521 | Yes | |
+| 19–31 | — | — | Reserved for future use by the standard. |
+
+The unsupported curves are the ones with no usable Rust crate behind them. Implementing them would mean hand-rolling curve arithmetic, which is a correctness and side-channel risk out of proportion to how rarely they appear in real documents. If crates appear for them, adding them is a matter of a line each in `src/pace/ecdh.rs` and `src/pace/domain.rs`.
+
+### Also not implemented
+
+- Explicit (non-standardized) domain parameters carried in a `PACEDomainParameterInfo`. Documents that use these are rejected with an explanation rather than guessed at.
+- Terminal Authentication and Chip Authentication, and with them the `0x7F4C` Certificate Holder Authorization Template in MSE:Set AT.
+
+### Testing
+
+The PACE implementation is checked against the worked examples in ICAO 9303 part 11: Appendix G.1 (ECDH Generic Mapping on BrainpoolP256r1 with AES-128), G.2 (DH Generic Mapping in the 1024-bit MODP group) and H.1 (Integrated Mapping). Every intermediate value the appendices publish is asserted, including the mapped generators, shared secrets, session keys and authentication tokens, so `cargo test` covers the cryptography without needing a document or a reader.
+
+Two things in those appendices are worth knowing if you compare against them yourself:
+
+- Appendix D quotes the BAC keys with DES parity bits adjusted. The key derivation function itself does not adjust them, since ICAO 9303 makes that step optional and the `des` crate ignores those bits, so the raw output differs in the low bit of most bytes.
+- Appendix H says it reuses the MRZ-derived key from Appendix G, but the Kπ it lists is derived from the CAN `123456`. The text is wrong; the value is what an implementation has to reproduce.
 
 ## Proxmark3 support
 

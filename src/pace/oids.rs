@@ -100,11 +100,6 @@ impl PaceAlgorithm {
         return vec![PACE_OID_PREFIX.as_slice(), &[mapping_arc, cipher_arc]].concat();
     }
 
-    /// Whether passauf can actually run this variant.
-    pub fn is_supported(&self) -> bool {
-        return self.mapping != Mapping::ChipAuthentication;
-    }
-
     /// Why this variant is unsupported, for reporting to the user.
     pub fn unsupported_reason(&self) -> Option<&'static str> {
         return match self.mapping {
@@ -212,7 +207,15 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(cam.mapping, Mapping::ChipAuthentication);
-        assert!(!cam.is_supported());
         assert!(cam.unsupported_reason().is_some());
+
+        // The mappings we do implement report no reason.
+        for mapping_arc in [0x01u8, 0x02, 0x03, 0x04] {
+            let oid = vec![PACE_OID_PREFIX.as_slice(), &[mapping_arc, 0x02]].concat();
+            assert!(PaceAlgorithm::from_oid_bytes(&oid)
+                .unwrap()
+                .unsupported_reason()
+                .is_none());
+        }
     }
 }

@@ -15,6 +15,28 @@ const TAG_SET: u16 = 0x31;
 const TAG_OBJECT_IDENTIFIER: u16 = 0x06;
 const TAG_INTEGER: u16 = 0x02;
 
+/// Why we cannot run a PACEInfo, covering both the algorithm and its domain
+/// parameters.
+fn unsupported_reason(pace_info: &PaceInfo) -> Option<String> {
+    if let Some(reason) = pace_info.algorithm.unsupported_reason() {
+        return Some(reason.to_string());
+    }
+
+    let parameter_id = pace_info.parameter_id?;
+    let parameter = match crate::pace::domain::from_parameter_id(parameter_id) {
+        Some(parameter) => parameter,
+        None => {
+            return Some(format!(
+                "domain parameter {} is reserved for future use",
+                parameter_id
+            ))
+        }
+    };
+    return parameter
+        .unsupported_reason()
+        .map(|reason| format!("{}: {}", parameter, reason));
+}
+
 impl types::EFCardAccess {
     #[cfg(feature = "cli")]
     pub fn fancy_print(&self, data_group: &types::DataGroup) {
@@ -23,15 +45,12 @@ impl types::EFCardAccess {
         for security_info in self.security_infos.iter() {
             match security_info {
                 SecurityInfo::Pace(pace_info) => {
-                    let support = if !pace_info.algorithm.is_supported() {
-                        // Say so up front rather than letting the user find out
-                        // when authentication fails.
-                        format!(
-                            " <red>(unsupported: {})</>",
-                            pace_info.algorithm.unsupported_reason().unwrap()
-                        )
-                    } else {
-                        String::new()
+                    // Say so up front rather than letting the user find out when
+                    // authentication fails. Both the algorithm and the domain
+                    // parameters can be ones we don't implement.
+                    let support = match unsupported_reason(pace_info) {
+                        Some(reason) => format!(" <red>(unsupported: {})</>", reason),
+                        None => String::new(),
                     };
                     info!(
                         "{:>pad_len$} <yellow>{}</>{}",
@@ -292,5 +311,33 @@ mod tests {
         // The version still reads, but the bad parameter ID is dropped.
         assert_eq!(parsed.pace_infos()[0].version, 2);
         assert_eq!(parsed.pace_infos()[0].parameter_id, None);
+    }
+
+    /// The display must flag unsupported domain parameters, not just
+    /// unsupported mappings, so the user sees why before authentication runs.
+    #[test]
+    fn flags_both_kinds_of_unsupported_variant() {
+        // Chip Authentication Mapping, which we recognize but do not perform.
+        let cam = parse(vec![
+            0x31, 0x14, 0x30, 0x12, 0x06, 0x0A, 0x04, 0x00, 0x7F, 0x00, 0x07, 0x02, 0x02, 0x04,
+            0x06, 0x02, 0x02, 0x01, 0x02, 0x02, 0x01, 0x0D,
+        ]);
+        let reason = unsupported_reason(cam.pace_infos()[0]).unwrap();
+        assert!(reason.contains("PACE-CAM"), "{}", reason);
+
+        // A supported mapping on BrainpoolP512r1, which has no Rust crate.
+        let unavailable_curve = parse(vec![
+            0x31, 0x14, 0x30, 0x12, 0x06, 0x0A, 0x04, 0x00, 0x7F, 0x00, 0x07, 0x02, 0x02, 0x04,
+            0x02, 0x02, 0x02, 0x01, 0x02, 0x02, 0x01, 0x11,
+        ]);
+        let reason = unsupported_reason(unavailable_curve.pace_infos()[0]).unwrap();
+        assert!(reason.contains("BrainpoolP512r1"), "{}", reason);
+
+        // And one we can actually run.
+        let supported = parse(vec![
+            0x31, 0x14, 0x30, 0x12, 0x06, 0x0A, 0x04, 0x00, 0x7F, 0x00, 0x07, 0x02, 0x02, 0x04,
+            0x02, 0x02, 0x02, 0x01, 0x02, 0x02, 0x01, 0x0D,
+        ]);
+        assert!(unsupported_reason(supported.pace_infos()[0]).is_none());
     }
 }
