@@ -194,6 +194,31 @@ pub enum ChipAuthentication {
     NoKeyAvailable,
 }
 
+impl ChipAuthentication {
+    /// Of two outcomes from two key sources, the one that says more.
+    ///
+    /// A key that was checked and did not match says more than "there was no
+    /// key to check", which in turn says more than not having looked. A pass
+    /// beats all of them: one matching key is the whole check, and a document
+    /// that publishes a key in EF.CardSecurity but not DG14 (or the reverse) is
+    /// perfectly normal.
+    pub fn strongest(self, other: ChipAuthentication) -> ChipAuthentication {
+        fn rank(outcome: &ChipAuthentication) -> u8 {
+            return match outcome {
+                ChipAuthentication::NotAttempted => 0,
+                ChipAuthentication::NoKeyAvailable => 1,
+                ChipAuthentication::Failed => 2,
+                ChipAuthentication::Passed { .. } => 3,
+            };
+        }
+        return if rank(&other) > rank(&self) {
+            other
+        } else {
+            self
+        };
+    }
+}
+
 /// What holding a file's contents against EF.SOD established.
 #[derive(Debug, Clone, PartialEq)]
 pub enum HashCheck {
@@ -439,6 +464,7 @@ where
                     }
                     _ => ChipAuthentication::NoKeyAvailable,
                 };
+
                 files.push(card_security);
 
                 // Not settled yet, so DG14 gets a turn once we are inside LDS1.
@@ -579,11 +605,12 @@ where
         if let Some(pending) = pending_chip_authentication.take() {
             match file.parsed {
                 Some(ParsedDataGroup::EFDG14(ref dg14)) => {
-                    chip_authentication = verify_chip_authentication(
-                        &pending,
-                        &dg14.chip_authentication_public_keys,
-                        "DG14",
-                    );
+                    chip_authentication =
+                        chip_authentication.strongest(verify_chip_authentication(
+                            &pending,
+                            &dg14.chip_authentication_public_keys,
+                            "DG14",
+                        ));
                     if chip_authentication == ChipAuthentication::Failed {
                         let warning = "Chip Authentication FAILED: no key in EF.CardSecurity or \
                                        DG14 matches the chip's mapping key. The chip may not be \
@@ -608,11 +635,7 @@ where
             .to_string();
         warn!("{}", warning);
         warnings.push(warning);
-        // A key from EF.CardSecurity that was checked and did not match is a
-        // stronger statement than "there was nothing to check", so keep it.
-        if chip_authentication != ChipAuthentication::Failed {
-            chip_authentication = ChipAuthentication::NoKeyAvailable;
-        }
+        chip_authentication = chip_authentication.strongest(ChipAuthentication::NoKeyAvailable);
     }
 
     // Anything EF.SOD covers that we never read stays unchecked.
@@ -907,6 +930,35 @@ mod tests {
             check_data_group_hash(&wrong, named_data_group("EF.DG1"), contents),
             HashCheck::Mismatch { .. }
         ));
+    }
+
+    /// A document can publish its Chip Authentication key in EF.CardSecurity,
+    /// in DG14, or in both, so the two sources have to be combined rather than
+    /// the second overwriting the first.
+    #[test]
+    fn keeps_the_more_informative_chip_authentication_outcome() {
+        let passed = ChipAuthentication::Passed {
+            source: "DG14".to_string(),
+            curve: "brainpoolP256r1".to_string(),
+        };
+
+        // A match anywhere is the whole check, so nothing later can undo it.
+        assert_eq!(passed.clone().strongest(ChipAuthentication::Failed), passed);
+        assert_eq!(
+            ChipAuthentication::NoKeyAvailable.strongest(passed.clone()),
+            passed
+        );
+
+        // A key that was checked and did not match says more than the other
+        // source having had no key to offer.
+        assert_eq!(
+            ChipAuthentication::Failed.strongest(ChipAuthentication::NoKeyAvailable),
+            ChipAuthentication::Failed
+        );
+        assert_eq!(
+            ChipAuthentication::NotAttempted.strongest(ChipAuthentication::NoKeyAvailable),
+            ChipAuthentication::NoKeyAvailable
+        );
     }
 
     /// EF.COM is not covered by EF.SOD's signature, so a data group dropped
