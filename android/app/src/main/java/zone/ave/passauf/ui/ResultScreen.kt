@@ -1,5 +1,6 @@
 package zone.ave.passauf.ui
 
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -56,6 +57,7 @@ import zone.ave.passauf.Detail
 import zone.ave.passauf.DocumentDetails
 import zone.ave.passauf.DocumentReport
 import zone.ave.passauf.FileReport
+import zone.ave.passauf.PassaufNative
 import zone.ave.passauf.Sharing
 import java.io.File
 import java.time.LocalDate
@@ -228,18 +230,19 @@ private fun IdentityCard(
 }
 
 /**
- * The holder's portrait, from the first image the platform can actually decode.
+ * The holder's portrait, from the first image that decodes.
  *
  * DG2 comes first in the list because it is the one a border check would use,
- * but plenty of documents encode it as JPEG 2000, which Android has no decoder
- * for. DG5's printed portrait is JPEG when it exists, so falling through to it
- * shows a face where taking only the first path would show a grey box.
+ * DG5's printed portrait after it. Each is tried with BitmapFactory first,
+ * which is hardware-accelerated and covers the JPEG half of documents, then
+ * with passauf's own decoder, which covers the JPEG 2000 half that Android
+ * has no support for.
  */
 @Composable
 private fun Portrait(paths: List<String>) {
     val bitmap = remember(paths) {
         paths.firstNotNullOfOrNull { path ->
-            runCatching { BitmapFactory.decodeFile(path) }.getOrNull()
+            runCatching { decodeImage(File(path)) }.getOrNull()
         }
     }
 
@@ -259,8 +262,8 @@ private fun Portrait(paths: List<String>) {
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxWidth(),
             )
-            // Every image the document had is in a format Android cannot
-            // decode, almost certainly JPEG 2000. They are all still saved.
+            // Neither decoder could make sense of any of them. They are all
+            // still saved, so the file can be opened elsewhere.
             paths.isNotEmpty() -> Text(
                 "Saved,\nbut not\ndisplayable",
                 style = MaterialTheme.typography.labelSmall,
@@ -606,6 +609,21 @@ private fun DetailRow(label: String, value: String?, monospaceValue: Boolean = f
             modifier = Modifier.weight(1f),
         )
     }
+}
+
+/**
+ * Decode an image a document carried, whatever it was encoded as.
+ *
+ * BitmapFactory first, since it handles JPEG and is hardware-accelerated;
+ * passauf's decoder second, for the JPEG 2000 that Android has no support for
+ * and that a great many issuers use for DG2.
+ */
+private fun decodeImage(file: File): Bitmap? {
+    if (!file.exists()) {
+        return null
+    }
+    BitmapFactory.decodeFile(file.absolutePath)?.let { return it }
+    return PassaufNative.decodeJpeg2000(file.readBytes())
 }
 
 /** The access mode in one line: the scheme, and for PACE the variant that ran. */

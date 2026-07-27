@@ -10,7 +10,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 
 use jni::objects::{JByteArray, JClass, JObject, JString, JValue};
-use jni::sys::jstring;
+use jni::sys::{jintArray, jstring};
 use jni::JNIEnv;
 use log::LevelFilter;
 use serde::Deserialize;
@@ -151,6 +151,63 @@ pub extern "system" fn Java_zone_ave_passauf_PassaufNative_nativeReadDocument<'l
     };
 
     return to_java_string(&mut env, &report);
+}
+
+/// Decode a JPEG 2000 image so the app can draw it.
+///
+/// Android's BitmapFactory has no JPEG 2000 decoder, and a good many issuers
+/// encode DG2 that way. This has nothing to do with reading or checking a
+/// document: it is the app asking for help with a picture it already has.
+///
+/// Returns an int array of `[width, height, pixels...]`, one packed ARGB_8888
+/// pixel each, or null if the data does not decode. The header is an internal
+/// arrangement between this function and `PassaufNative.decodeJpeg2000`.
+#[no_mangle]
+pub extern "system" fn Java_zone_ave_passauf_PassaufNative_nativeDecodeJpeg2000<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    data: JByteArray<'local>,
+) -> jintArray {
+    logger::install();
+
+    let bytes = match env.convert_byte_array(&data) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            log::error!("Could not read the image to decode: {}", error);
+            return JObject::null().into_raw();
+        }
+    };
+
+    let image = match crate::images::decode_jpeg2000(&bytes) {
+        Some(image) => image,
+        None => return JObject::null().into_raw(),
+    };
+
+    // Android wants one packed ARGB int per pixel, which is a different byte
+    // order from the RGBA the decoder produces.
+    let mut packed: Vec<i32> = Vec::with_capacity(2 + image.data.len() / 4);
+    packed.push(image.width as i32);
+    packed.push(image.height as i32);
+    for pixel in image.data.chunks_exact(4) {
+        let argb = (u32::from(pixel[3]) << 24)
+            | (u32::from(pixel[0]) << 16)
+            | (u32::from(pixel[1]) << 8)
+            | u32::from(pixel[2]);
+        packed.push(argb as i32);
+    }
+
+    let array = match env.new_int_array(packed.len() as i32) {
+        Ok(array) => array,
+        Err(error) => {
+            log::error!("Could not allocate room for the decoded image: {}", error);
+            return JObject::null().into_raw();
+        }
+    };
+    if let Err(error) = env.set_int_array_region(&array, 0, &packed) {
+        log::error!("Could not return the decoded image: {}", error);
+        return JObject::null().into_raw();
+    }
+    return array.into_raw();
 }
 
 /// Everything that happens between the two JNI conversions.

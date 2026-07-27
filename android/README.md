@@ -26,10 +26,11 @@ transport: it holds the `IsoDep` connection and hands each APDU to the chip.
   images inside DG2, DG5 and DG7 are written out alongside them as `.jpeg` or
   `.jp2`. The results screen can share one file or all of them.
 
-Note that Android has no JPEG 2000 decoder, and many issuers encode DG2 that
-way. Such a portrait is still read, hashed and saved, it just cannot be shown;
-the app falls through to DG5's printed portrait when the document has one, and
-otherwise says the image was saved but is not displayable.
+Android's `BitmapFactory` has no JPEG 2000 decoder, and a great many issuers
+encode DG2 that way, so the app borrows passauf's: each portrait is tried with
+BitmapFactory first, which is hardware-accelerated and covers the JPEG half of
+documents, and then with the library's own decoder. DG2 is preferred over DG5,
+and only an image neither can read shows as saved-but-not-displayable.
 
 There is no MRZ scanner yet. Everything is typed in by hand.
 
@@ -39,8 +40,8 @@ You need:
 
 - The Android SDK with **NDK** installed (Android Studio: *SDK Manager > SDK
   Tools > NDK (Side by side)*).
-- A **Rust toolchain**. `build-rust.sh` adds the Android targets itself if they
-  are missing.
+- A **Rust toolchain**, 1.92 or newer. `build-rust.sh` adds the Android targets
+  itself if they are missing.
 - **JDK 17**.
 
 Then:
