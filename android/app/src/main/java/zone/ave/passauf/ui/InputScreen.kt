@@ -1,4 +1,4 @@
-package io.github.aveao.passauf.ui
+package zone.ave.passauf.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -39,8 +39,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import io.github.aveao.passauf.AccessForm
-import io.github.aveao.passauf.KeyKind
+import zone.ave.passauf.AccessForm
+import zone.ave.passauf.KeyKind
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter

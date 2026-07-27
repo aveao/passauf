@@ -1,4 +1,4 @@
-package io.github.aveao.passauf.ui
+package zone.ave.passauf.ui
 
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
@@ -52,11 +52,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import io.github.aveao.passauf.Detail
-import io.github.aveao.passauf.DocumentDetails
-import io.github.aveao.passauf.DocumentReport
-import io.github.aveao.passauf.FileReport
-import io.github.aveao.passauf.Sharing
+import zone.ave.passauf.Detail
+import zone.ave.passauf.DocumentDetails
+import zone.ave.passauf.DocumentReport
+import zone.ave.passauf.FileReport
+import zone.ave.passauf.Sharing
 import java.io.File
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter

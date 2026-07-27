@@ -93,7 +93,7 @@ no Proxmark, no CLI, and a JNI entry point instead. It exposes exactly one
 function:
 
 ```
-Java_io_github_aveao_passauf_PassaufNative_nativeReadDocument(
+Java_zone_ave_passauf_PassaufNative_nativeReadDocument(
     optionsJson: String,
     transceiver: Transceiver,
     progress: ProgressListener?,
@@ -161,7 +161,7 @@ android/
 ├── build-rust.sh                    cross-compiles the crate into jniLibs
 ├── app/src/main/
 │   ├── AndroidManifest.xml
-│   └── java/io/github/aveao/passauf/
+│   └── java/zone/ave/passauf/
 │       ├── PassaufNative.kt         the JNI binding and the report's shape
 │       ├── ReaderViewModel.kt       form state, NFC tag handling, the read
 │       ├── MainActivity.kt          reader mode and the screen to show

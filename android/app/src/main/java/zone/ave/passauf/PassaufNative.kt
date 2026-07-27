@@ -1,4 +1,4 @@
-package io.github.aveao.passauf
+package zone.ave.passauf
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable

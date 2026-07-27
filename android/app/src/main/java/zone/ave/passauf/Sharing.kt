@@ -1,4 +1,4 @@
-package io.github.aveao.passauf
+package zone.ave.passauf
 
 import android.content.Context
 import android.content.Intent

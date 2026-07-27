@@ -1,4 +1,4 @@
-package io.github.aveao.passauf.ui
+package zone.ave.passauf.ui
 
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme

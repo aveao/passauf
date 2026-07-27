@@ -1,4 +1,4 @@
-package io.github.aveao.passauf.ui
+package zone.ave.passauf.ui
 
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode

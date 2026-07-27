@@ -88,7 +88,7 @@ fn log_level(name: &Option<String>) -> LevelFilter {
 /// `PassaufNative.ProgressListener` or is null. Returns the report as JSON;
 /// a null return means the JVM is in no state to be given a string.
 #[no_mangle]
-pub extern "system" fn Java_io_github_aveao_passauf_PassaufNative_nativeReadDocument<'local>(
+pub extern "system" fn Java_zone_ave_passauf_PassaufNative_nativeReadDocument<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     options_json: JString<'local>,

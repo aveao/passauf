@@ -12,11 +12,11 @@ val rustAbis: List<String> = (project.findProperty("passauf.rustAbis") as String
 val skipRustBuild = (project.findProperty("passauf.skipRustBuild") as String?).toBoolean()
 
 android {
-    namespace = "io.github.aveao.passauf"
+    namespace = "zone.ave.passauf"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "io.github.aveao.passauf"
+        applicationId = "zone.ave.passauf"
         // Matches API_LEVEL in build-rust.sh, which is what the NDK stamps into
         // libpassauf.so. Raising one without the other gives a library the
         // device refuses to load.

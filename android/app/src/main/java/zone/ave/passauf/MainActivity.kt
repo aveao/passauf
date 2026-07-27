@@ -1,4 +1,4 @@
-package io.github.aveao.passauf
+package zone.ave.passauf
 
 import android.nfc.NfcAdapter
 import android.os.Bundle
@@ -26,11 +26,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import io.github.aveao.passauf.ui.InputScreen
-import io.github.aveao.passauf.ui.PassaufTheme
-import io.github.aveao.passauf.ui.ReadingScreen
-import io.github.aveao.passauf.ui.ResultScreen
-import io.github.aveao.passauf.ui.WaitingScreen
+import zone.ave.passauf.ui.InputScreen
+import zone.ave.passauf.ui.PassaufTheme
+import zone.ave.passauf.ui.ReadingScreen
+import zone.ave.passauf.ui.ResultScreen
+import zone.ave.passauf.ui.WaitingScreen
 
 /**
  * The whole app.
