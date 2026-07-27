@@ -2,8 +2,11 @@ mod dg_parsers;
 mod helpers;
 mod icao9303;
 mod iso7816;
+#[cfg(feature = "pace")]
+mod pace;
 #[cfg(feature = "proxmark")]
 mod proxmark;
+mod secure_messaging;
 mod smartcard_abstractions;
 mod types;
 
