@@ -1,6 +1,6 @@
 # PACE implementation design
 
-Status: approved, in implementation on branch `pace`.
+Status: implemented on branch `pace`.
 
 ## Goal
 

@@ -93,7 +93,8 @@ fn main() {
         .select()
         .expect("Couldn't select an eMRTD in range.");
 
-    // Read EF.CardAccess
+    // Read EF.CardAccess. Only PACE has any use for what's in it.
+    #[cfg_attr(not(feature = "pace"), allow(unused_variables))]
     let (_, _, parsed_card_access) = helpers::read_file_by_name(
         &mut smartcard,
         DataGroupEnum::EFCardAccess,

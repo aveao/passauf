@@ -16,10 +16,12 @@ retail-mac = "0.1.0"
 sha1 = "0.11.0"
 des = "0.9.0"
 cbc = { version = "0.2.1", features = ["alloc"] }
+# Secure messaging can use AES regardless of how the keys were established,
+# so these are not tied to the pace feature.
+sha2 = "0.11.0"
+aes = "0.9.2"
+cmac = "0.8.0"
 # PACE additions
-sha2 = { version = "0.11.0", optional = true }
-aes = { version = "0.9.2", optional = true }
-cmac = { version = "0.8.0", optional = true }
 crypto-bigint = { version = "0.7", features = ["alloc"], optional = true }
 elliptic-curve = { version = "0.14", features = ["arithmetic"], optional = true }
 p256 = { version = "0.14", features = ["arithmetic"], optional = true }
@@ -44,9 +46,6 @@ cli = ["dep:clap", "clap/derive"]
 # PACE support.
 pace = [
     "dep:asn1",
-    "dep:sha2",
-    "dep:aes",
-    "dep:cmac",
     "dep:crypto-bigint",
     "dep:elliptic-curve",
     "dep:p256",

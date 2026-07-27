@@ -7,7 +7,6 @@ use cbc::cipher::BlockCipherEncrypt;
 use cbc::cipher::{inout::block_padding, BlockModeDecrypt, BlockModeEncrypt, KeyInit, KeyIvInit};
 use cmac::{Cmac, Mac};
 use sha1::{Digest, Sha1};
-#[cfg(feature = "pace")]
 use sha2::Sha256;
 
 type TDesCbcEnc = cbc::Encryptor<des::TdesEde2>;
@@ -91,17 +90,9 @@ pub fn kdf(algorithm: SmAlgorithm, shared_secret: &[u8], counter: u32) -> Vec<u8
         hasher.update(input.as_slice());
         hasher.finalize().to_vec()
     } else {
-        #[cfg(feature = "pace")]
-        {
-            let mut hasher = Sha256::new();
-            hasher.update(input.as_slice());
-            hasher.finalize().to_vec()
-        }
-        // AES-192 and AES-256 only ever come up through PACE.
-        #[cfg(not(feature = "pace"))]
-        {
-            panic!("SHA-256 key derivation requires the pace feature.");
-        }
+        let mut hasher = Sha256::new();
+        hasher.update(input.as_slice());
+        hasher.finalize().to_vec()
     };
     return keydata[..algorithm.key_length()].to_vec();
 }

@@ -16,13 +16,16 @@ pub enum Command {
     SelectFile = 0xA4,
     GetChallenge = 0x84,
     ExternalAuthentication = 0x82,
+    #[cfg(feature = "pace")]
     ManageSecurityEnvironment = 0x22,
+    #[cfg(feature = "pace")]
     GeneralAuthenticate = 0x86,
 }
 
 /// Marks a command as one link of a chain (ISO/IEC 7816-4 section 5.1.1).
 ///
 /// PACE requires every GENERAL AUTHENTICATE but the last to set this.
+#[cfg(feature = "pace")]
 pub const CLA_COMMAND_CHAINING: u8 = 0x10;
 
 // Taken from https://github.com/RfidResearchGroup/proxmark3/blob/master/include/protocols.h#L502
