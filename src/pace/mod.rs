@@ -254,12 +254,13 @@ fn authentication_token_input(
     return helpers::encode_ber(&TAG_PUBLIC_KEY.to_be_bytes(), &inner);
 }
 
-/// Pick the first PACEInfo we can actually run.
+/// Pick the best PACEInfo we can actually run.
 ///
 /// Collects why each rejected entry was rejected, so an unsupported document
 /// says what it wanted rather than just failing to authenticate.
 pub fn select_pace_info(pace_infos: &[&PaceInfo]) -> Result<PaceInfo, PaceError> {
     let mut rejections: Vec<String> = vec![];
+    let mut usable: Vec<&PaceInfo> = vec![];
 
     for pace_info in pace_infos {
         if let Some(reason) = pace_info.algorithm.unsupported_reason() {
@@ -325,14 +326,27 @@ pub fn select_pace_info(pace_infos: &[&PaceInfo]) -> Result<PaceInfo, PaceError>
             }
         }
 
-        return Ok((*pace_info).clone());
+        usable.push(*pace_info);
     }
 
-    return Err(PaceError::NoSupportedAlgorithm(if rejections.is_empty() {
-        "the document offered none".to_string()
-    } else {
-        rejections.join("; ")
-    }));
+    // ICAO 9303 p11 Appendix J: "If supported by IC and terminal, PACE-CAM
+    // should be used". It also proves the chip holds the private key for its
+    // Chip Authentication key, which the other mappings do not, so take it
+    // whenever the document offers it. Otherwise keep the document's order.
+    let selected = usable
+        .iter()
+        .copied()
+        .find(|candidate| candidate.algorithm.mapping == Mapping::ChipAuthentication)
+        .or_else(|| usable.first().copied());
+
+    return match selected {
+        Some(pace_info) => Ok(pace_info.clone()),
+        None => Err(PaceError::NoSupportedAlgorithm(if rejections.is_empty() {
+            "the document offered none".to_string()
+        } else {
+            rejections.join("; ")
+        })),
+    };
 }
 
 /// Run PACE and return the secure messaging session it establishes.
@@ -983,6 +997,42 @@ mod tests {
         let cam = pace_info(0x06, 0x02, Some(13));
         let selected = select_pace_info(&[&cam]).unwrap();
         assert_eq!(selected.algorithm.mapping, Mapping::ChipAuthentication);
+    }
+
+    /// ICAO 9303 p11 Appendix J says PACE-CAM should be used when both sides
+    /// support it, and it proves more than the other mappings do, so it wins
+    /// even when the document lists it second.
+    ///
+    /// This is the order a real Reiseausweis für Ausländer lists them in.
+    #[test]
+    fn prefers_chip_authentication_mapping_over_generic() {
+        let generic = pace_info(0x02, 0x02, Some(13));
+        let cam = pace_info(0x06, 0x02, Some(13));
+        let selected = select_pace_info(&[&generic, &cam]).unwrap();
+        assert_eq!(selected.algorithm.mapping, Mapping::ChipAuthentication);
+    }
+
+    /// But a document that offers no CAM still gets its own first choice.
+    #[test]
+    fn keeps_document_order_without_chip_authentication_mapping() {
+        let generic = pace_info(0x02, 0x02, Some(13));
+        let integrated = pace_info(0x04, 0x02, Some(13));
+        let selected = select_pace_info(&[&generic, &integrated]).unwrap();
+        assert_eq!(selected.algorithm.mapping, Mapping::Generic);
+
+        let selected = select_pace_info(&[&integrated, &generic]).unwrap();
+        assert_eq!(selected.algorithm.mapping, Mapping::Integrated);
+    }
+
+    /// A CAM entry we cannot run must not shadow one we can.
+    #[test]
+    fn skips_an_unusable_chip_authentication_mapping_entry() {
+        // CAM on BrainpoolP512r1, which has no Rust implementation.
+        let unusable_cam = pace_info(0x06, 0x02, Some(17));
+        let generic = pace_info(0x02, 0x02, Some(13));
+        let selected = select_pace_info(&[&unusable_cam, &generic]).unwrap();
+        assert_eq!(selected.algorithm.mapping, Mapping::Generic);
+        assert_eq!(selected.parameter_id, Some(13));
     }
 
     /// A document offering only variants we lack must say what it wanted.
