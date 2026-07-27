@@ -64,20 +64,28 @@ pub fn padding_method_2_pad(input: &[u8], block_size: usize) -> Vec<u8> {
 
 /// Undoes Padding Method 2 based on ISO 9797-1.
 ///
-/// Takes the data and returns a new Vec without the padding.
-pub fn padding_method_2_unpad(input: &[u8]) -> Vec<u8> {
+/// Returns None when the data isn't padded that way.
+pub fn padding_method_2_unpad_checked(input: &[u8]) -> Option<Vec<u8>> {
     // Walk back over the trailing zeroes to the 0x80 marker.
     let mut end = input.len();
     while end > 0 {
         end -= 1;
         match input[end] {
             0x00 => continue,
-            0x80 => return input[..end].to_vec(),
+            0x80 => return Some(input[..end].to_vec()),
             // Anything else means this was never padded this way.
             _ => break,
         }
     }
-    panic!("Data is not padded according to padding method 2.");
+    return None;
+}
+
+/// Undoes Padding Method 2 based on ISO 9797-1.
+///
+/// Takes the data and returns a new Vec without the padding.
+pub fn padding_method_2_unpad(input: &[u8]) -> Vec<u8> {
+    return padding_method_2_unpad_checked(input)
+        .expect("Data is not padded according to padding method 2.");
 }
 
 /// The key derivation function KDF(K, c) of ICAO 9303 p11 section 9.7.1.
@@ -191,6 +199,28 @@ impl SecureMessaging {
         return padding_method_2_pad(data, self.block_size());
     }
 
+    /// Encrypt a single block with the session's encryption key in ECB mode.
+    ///
+    /// Used to derive initialisation vectors, which is the only place ICAO 9303
+    /// applies the raw block cipher.
+    fn encrypt_block_ecb(&self, block: [u8; 16]) -> Vec<u8> {
+        let mut block = block.into();
+        match self.algorithm {
+            SmAlgorithm::Aes128 => aes::Aes128::new_from_slice(&self.ks_enc)
+                .unwrap()
+                .encrypt_block(&mut block),
+            SmAlgorithm::Aes192 => aes::Aes192::new_from_slice(&self.ks_enc)
+                .unwrap()
+                .encrypt_block(&mut block),
+            SmAlgorithm::Aes256 => aes::Aes256::new_from_slice(&self.ks_enc)
+                .unwrap()
+                .encrypt_block(&mut block),
+            // 3DES has a different block size and never needs this.
+            SmAlgorithm::Tdes => unreachable!("3DES derives no IV from a block cipher."),
+        }
+        return block.to_vec();
+    }
+
     /// The CBC initialisation vector for the current counter value.
     ///
     /// ICAO 9303 p11 section 9.8.6.1 has 3DES use an all-zero IV, while AES
@@ -201,26 +231,7 @@ impl SecureMessaging {
             _ => {
                 let mut block = [0u8; 16];
                 block.copy_from_slice(&self.ssc);
-                let mut block = block.into();
-                match self.algorithm {
-                    SmAlgorithm::Aes128 => {
-                        aes::Aes128::new_from_slice(&self.ks_enc)
-                            .unwrap()
-                            .encrypt_block(&mut block);
-                    }
-                    SmAlgorithm::Aes192 => {
-                        aes::Aes192::new_from_slice(&self.ks_enc)
-                            .unwrap()
-                            .encrypt_block(&mut block);
-                    }
-                    SmAlgorithm::Aes256 => {
-                        aes::Aes256::new_from_slice(&self.ks_enc)
-                            .unwrap()
-                            .encrypt_block(&mut block);
-                    }
-                    SmAlgorithm::Tdes => unreachable!(),
-                }
-                block.to_vec()
+                self.encrypt_block_ecb(block)
             }
         };
     }
@@ -277,6 +288,53 @@ impl SecureMessaging {
                     .unwrap()
             }
         };
+    }
+
+    /// Decrypt the Encrypted Chip Authentication Data of PACE-CAM
+    /// (ICAO 9303 p11 section 4.4.3.5.4).
+    ///
+    /// This uses the session's encryption key but its own initialisation
+    /// vector, `E(KS_enc, -1)` where `-1` is 128 bits all set, rather than the
+    /// counter-derived one secure messaging uses. Returns the unpadded value.
+    ///
+    /// Returns None if the input isn't a whole number of blocks or isn't
+    /// padded the way the standard requires.
+    #[cfg(feature = "pace")]
+    pub fn decrypt_chip_authentication_data(&self, data: &[u8]) -> Option<Vec<u8>> {
+        // Chip Authentication Mapping is ECDH-only, and every PACE ECDH variant
+        // uses AES, so 3DES cannot come up here.
+        if self.algorithm == SmAlgorithm::Tdes {
+            return None;
+        }
+        if data.is_empty() || data.len() % self.block_size() != 0 {
+            return None;
+        }
+
+        let iv = self.encrypt_block_ecb([0xFFu8; 16]);
+        let decrypted = match self.algorithm {
+            SmAlgorithm::Aes128 => {
+                cbc::Decryptor::<aes::Aes128>::new_from_slices(&self.ks_enc, &iv)
+                    .ok()?
+                    .decrypt_padded_vec::<block_padding::NoPadding>(data)
+                    .ok()?
+            }
+            SmAlgorithm::Aes192 => {
+                cbc::Decryptor::<aes::Aes192>::new_from_slices(&self.ks_enc, &iv)
+                    .ok()?
+                    .decrypt_padded_vec::<block_padding::NoPadding>(data)
+                    .ok()?
+            }
+            SmAlgorithm::Aes256 => {
+                cbc::Decryptor::<aes::Aes256>::new_from_slices(&self.ks_enc, &iv)
+                    .ok()?
+                    .decrypt_padded_vec::<block_padding::NoPadding>(data)
+                    .ok()?
+            }
+            SmAlgorithm::Tdes => unreachable!(),
+        };
+        // 4.4.3.5.3: padding method 2. The chip controls this value, so a bad
+        // padding is a protocol error rather than something to panic over.
+        return padding_method_2_unpad_checked(&decrypted);
     }
 
     /// Authenticate exactly the bytes given, adding no padding of its own.
@@ -504,6 +562,67 @@ mod tests {
             assert_eq!(sm.mac(&sm.pad(b"passauf")).len(), 8);
             assert_eq!(sm.mac_with_internal_padding(b"passauf").len(), 8);
         }
+    }
+
+    /// ICAO 9303 p11 Appendix I works through PACE-CAM, including the
+    /// Encrypted Chip Authentication Data and the unusual IV it uses.
+    #[cfg(feature = "pace")]
+    #[test]
+    fn decrypts_chip_authentication_data_from_worked_example() {
+        let ks_enc = vec![
+            0x0A, 0x9D, 0xA4, 0xDB, 0x03, 0xBD, 0xDE, 0x39, 0xFC, 0x52, 0x02, 0xBC, 0x44, 0xB2,
+            0xE8, 0x9E,
+        ];
+        let sm = SecureMessaging::new(SmAlgorithm::Aes128, ks_enc, vec![0x11u8; 16]);
+
+        // The IV is E(KS_enc, -1), not the counter-derived one.
+        assert_eq!(
+            sm.encrypt_block_ecb([0xFFu8; 16]),
+            vec![
+                0xF6, 0xA3, 0xB7, 0x5A, 0x1E, 0x93, 0x39, 0x41, 0xDD, 0x7A, 0x13, 0xE2, 0x52, 0x07,
+                0x79, 0xDF
+            ]
+        );
+
+        let encrypted = [
+            0x1E, 0xEA, 0x96, 0x4D, 0xAA, 0xE3, 0x72, 0xAC, 0x99, 0x0E, 0x3E, 0xFD, 0xE6, 0x33,
+            0x33, 0x53, 0xBF, 0xC8, 0x9A, 0x67, 0x04, 0xD9, 0x3D, 0xA8, 0x79, 0x8C, 0xF7, 0x7F,
+            0x5B, 0x7A, 0x54, 0xBD, 0x10, 0xCB, 0xA3, 0x72, 0xB4, 0x2B, 0xE0, 0xB9, 0xB5, 0xF2,
+            0x8A, 0xA8, 0xDE, 0x2F, 0x4F, 0x92,
+        ];
+        assert_eq!(
+            sm.decrypt_chip_authentication_data(&encrypted).unwrap(),
+            vec![
+                0x85, 0xDC, 0x3F, 0xA9, 0x3D, 0x09, 0x52, 0xBF, 0xA8, 0x2F, 0x5F, 0xD1, 0x89, 0xEE,
+                0x75, 0xBD, 0x82, 0xF1, 0x1D, 0x1F, 0x0B, 0x8E, 0xD4, 0xBF, 0x53, 0x19, 0xAC, 0x9B,
+                0x53, 0xC4, 0x26, 0xB3
+            ]
+        );
+    }
+
+    /// The chip controls this data, so malformed input must be rejected rather
+    /// than panicking the way the internal unpad does.
+    #[cfg(feature = "pace")]
+    #[test]
+    fn rejects_malformed_chip_authentication_data() {
+        let sm = SecureMessaging::new(SmAlgorithm::Aes128, vec![0x11u8; 16], vec![0x22u8; 16]);
+        // Not a whole number of blocks.
+        assert!(sm.decrypt_chip_authentication_data(&[0u8; 17]).is_none());
+        // Empty.
+        assert!(sm.decrypt_chip_authentication_data(&[]).is_none());
+        // Whole blocks, but the plaintext won't carry valid padding.
+        assert!(sm.decrypt_chip_authentication_data(&[0u8; 16]).is_none());
+    }
+
+    #[test]
+    fn unpad_reports_bad_padding_instead_of_guessing() {
+        assert_eq!(
+            padding_method_2_unpad_checked(&[1, 2, 0x80]),
+            Some(vec![1, 2])
+        );
+        // No 0x80 marker anywhere.
+        assert!(padding_method_2_unpad_checked(&[1, 2, 3]).is_none());
+        assert!(padding_method_2_unpad_checked(&[]).is_none());
     }
 
     /// AES-CMAC pads internally, 3DES does not, so only 3DES should see a

@@ -66,6 +66,62 @@ struct CliArgs {
     log_level: simplelog::LevelFilter,
 }
 
+/// Complete a PACE-CAM check against the keys DG14 offers.
+///
+/// A pass proves the chip holds the private key for the Chip Authentication key
+/// it presented. It does not prove that key belongs to a genuine document:
+/// ICAO 9303 p11 section 4.4.3.5.2 requires Passive Authentication alongside
+/// CAM for that, and passauf does not validate EF.SOD yet.
+#[cfg(feature = "pace")]
+fn verify_chip_authentication(
+    pending: &pace::PendingChipAuthentication,
+    dg14: &types::EFDG14,
+) -> bool {
+    let matching_keys: Vec<_> = dg14
+        .chip_authentication_public_keys
+        .iter()
+        // A chip may hold several keys; only those on the curve PACE ran over
+        // can possibly match.
+        .filter(|key_info| {
+            key_info.parameter_id.and_then(pace::domain::from_parameter_id).is_some_and(
+                |parameter| {
+                    matches!(parameter, pace::domain::DomainParameter::Ec(curve) if curve == pending.curve())
+                },
+            )
+        })
+        .collect();
+
+    if matching_keys.is_empty() {
+        warn!(
+            "Chip Authentication Mapping was used, but DG14 offers no public key on {}, \
+             so the chip's genuineness is unverified.",
+            pending.curve()
+        );
+        return false;
+    }
+
+    for key_info in matching_keys {
+        if pending.verify(&key_info.public_key) {
+            info!(
+                "<green>Chip Authentication passed</> (the chip holds the private key for its \
+                 DG14 key on {}).",
+                pending.curve()
+            );
+            info!(
+                "<d>Note: without Passive Authentication that key itself is unverified, so this \
+                 does not prove the document is genuine.</>"
+            );
+            return true;
+        }
+    }
+
+    warn!(
+        "Chip Authentication FAILED: no DG14 public key matches the chip's mapping key. \
+         The chip may not be genuine."
+    );
+    return false;
+}
+
 fn main() {
     let args = CliArgs::parse();
 
@@ -181,10 +237,23 @@ fn main() {
         _ => None,
     };
     #[cfg(not(feature = "pace"))]
-    let pace_session: Option<secure_messaging::SecureMessaging> = None;
+    let pace_session: Option<(secure_messaging::SecureMessaging, Option<()>)> = None;
+
+    // Chip Authentication Mapping hands back a check that can only be completed
+    // once DG14 has been read, which needs secure messaging to be up first.
+    #[cfg(feature = "pace")]
+    let mut pending_chip_authentication = None;
 
     let mut sm = match pace_session {
-        Some(sm) => sm,
+        Some((sm, pending)) => {
+            #[cfg(feature = "pace")]
+            {
+                pending_chip_authentication = pending;
+            }
+            #[cfg(not(feature = "pace"))]
+            let _ = pending;
+            sm
+        }
         None => {
             if args.card_access_number.is_some() {
                 panic!(
@@ -231,12 +300,33 @@ fn main() {
             continue;
         }
 
-        helpers::secure_read_file(
+        let (_, parsed_data) = helpers::secure_read_file(
             &mut smartcard,
             dg_info,
             &filename_distinguisher,
             &args.dump_path,
             Some(&mut sm),
+        );
+
+        // DG14 carries the chip's static Chip Authentication key, which is what
+        // a pending PACE-CAM check has been waiting for.
+        #[cfg(feature = "pace")]
+        if let Some(pending) = pending_chip_authentication.take() {
+            match parsed_data {
+                Some(types::ParsedDataGroup::EFDG14(ref dg14)) => {
+                    verify_chip_authentication(&pending, dg14);
+                }
+                // Not DG14, so keep waiting.
+                _ => pending_chip_authentication = Some(pending),
+            }
+        }
+    }
+
+    #[cfg(feature = "pace")]
+    if pending_chip_authentication.is_some() {
+        warn!(
+            "Chip Authentication Mapping was used, but the document has no readable DG14 \
+             to check it against, so the chip's genuineness is unverified."
         );
     }
 

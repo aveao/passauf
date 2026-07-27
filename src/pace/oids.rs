@@ -21,8 +21,8 @@ pub enum KeyAgreement {
 pub enum Mapping {
     Generic,
     Integrated,
-    /// Chip Authentication Mapping. Recognized so we can report it precisely,
-    /// but not implemented.
+    /// Chip Authentication Mapping, which extends the Generic Mapping to prove
+    /// the chip holds the private key for its static Chip Authentication key.
     ChipAuthentication,
 }
 
@@ -101,10 +101,15 @@ impl PaceAlgorithm {
     }
 
     /// Why this variant is unsupported, for reporting to the user.
+    ///
+    /// Every mapping is implemented now, so this only reports combinations the
+    /// standard does not assign.
     pub fn unsupported_reason(&self) -> Option<&'static str> {
-        return match self.mapping {
-            Mapping::ChipAuthentication => {
-                Some("Chip Authentication Mapping (PACE-CAM) is not implemented")
+        return match (self.key_agreement, self.mapping) {
+            // No OID exists for this, so it cannot come off a document, but the
+            // type system allows constructing it.
+            (KeyAgreement::Dh, Mapping::ChipAuthentication) => {
+                Some("Chip Authentication Mapping is only defined for ECDH")
             }
             _ => None,
         };
@@ -201,21 +206,25 @@ mod tests {
     }
 
     #[test]
-    fn chip_authentication_mapping_is_unsupported() {
-        let cam = PaceAlgorithm::from_oid_bytes(&[
-            0x04, 0x00, 0x7F, 0x00, 0x07, 0x02, 0x02, 0x04, 0x06, 0x02,
-        ])
-        .unwrap();
-        assert_eq!(cam.mapping, Mapping::ChipAuthentication);
-        assert!(cam.unsupported_reason().is_some());
-
-        // The mappings we do implement report no reason.
-        for mapping_arc in [0x01u8, 0x02, 0x03, 0x04] {
+    fn every_assigned_mapping_is_supported() {
+        // Including Chip Authentication Mapping, whose arc is 0x06.
+        for mapping_arc in [0x01u8, 0x02, 0x03, 0x04, 0x06] {
             let oid = vec![PACE_OID_PREFIX.as_slice(), &[mapping_arc, 0x02]].concat();
-            assert!(PaceAlgorithm::from_oid_bytes(&oid)
-                .unwrap()
-                .unsupported_reason()
-                .is_none());
+            let algorithm = PaceAlgorithm::from_oid_bytes(&oid).unwrap();
+            assert!(
+                algorithm.unsupported_reason().is_none(),
+                "{} should be supported",
+                algorithm
+            );
         }
+
+        // CAM is ECDH-only, so the DH pairing has no OID and is rejected.
+        assert!(PaceAlgorithm {
+            key_agreement: KeyAgreement::Dh,
+            mapping: Mapping::ChipAuthentication,
+            cipher: SmAlgorithm::Aes128,
+        }
+        .unsupported_reason()
+        .is_some());
     }
 }

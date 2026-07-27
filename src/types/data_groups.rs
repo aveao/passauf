@@ -247,9 +247,14 @@ pub static DATA_GROUPS: [DataGroup; 22] = [
         pace_only: false,
         eac_only: false,
         in_lds1: true,
+        #[cfg(feature = "pace")]
+        parser: dg_parsers::ef_dg14::parser,
+        #[cfg(not(feature = "pace"))]
         parser: dg_parsers::generic::parser,
         dumper: dg_parsers::generic::dumper,
-        is_binary: true,
+        // SecurityInfos rather than a binary blob, and PACE-CAM needs it read
+        // whether or not the user asked for a dump.
+        is_binary: false,
     },
     DataGroup {
         name: "EF.DG15",

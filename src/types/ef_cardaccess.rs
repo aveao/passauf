@@ -37,6 +37,20 @@ pub struct UnknownSecurityInfo {
     pub protocol: Vec<u8>,
 }
 
+/// A ChipAuthenticationPublicKeyInfo entry (ICAO 9303 p11 section 9.2.6).
+///
+/// This carries the chip's *static* Chip Authentication public key, which
+/// PACE-CAM checks its mapping key against.
+#[derive(Debug, Clone)]
+pub struct ChipAuthenticationPublicKeyInfo {
+    /// Standardized domain parameter ID the key belongs to.
+    pub parameter_id: Option<u64>,
+    /// The public key, SEC1 encoded for ECDH.
+    pub public_key: Vec<u8>,
+    /// Distinguishes keys when the chip holds more than one.
+    pub key_id: Option<u64>,
+}
+
 #[derive(Debug, Clone)]
 pub enum SecurityInfo {
     Pace(PaceInfo),

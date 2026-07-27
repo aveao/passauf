@@ -313,18 +313,10 @@ mod tests {
         assert_eq!(parsed.pace_infos()[0].parameter_id, None);
     }
 
-    /// The display must flag unsupported domain parameters, not just
-    /// unsupported mappings, so the user sees why before authentication runs.
+    /// The display must flag a variant we can't run, so the user sees why
+    /// before authentication is attempted.
     #[test]
-    fn flags_both_kinds_of_unsupported_variant() {
-        // Chip Authentication Mapping, which we recognize but do not perform.
-        let cam = parse(vec![
-            0x31, 0x14, 0x30, 0x12, 0x06, 0x0A, 0x04, 0x00, 0x7F, 0x00, 0x07, 0x02, 0x02, 0x04,
-            0x06, 0x02, 0x02, 0x01, 0x02, 0x02, 0x01, 0x0D,
-        ]);
-        let reason = unsupported_reason(cam.pace_infos()[0]).unwrap();
-        assert!(reason.contains("PACE-CAM"), "{}", reason);
-
+    fn flags_unsupported_domain_parameters() {
         // A supported mapping on BrainpoolP512r1, which has no Rust crate.
         let unavailable_curve = parse(vec![
             0x31, 0x14, 0x30, 0x12, 0x06, 0x0A, 0x04, 0x00, 0x7F, 0x00, 0x07, 0x02, 0x02, 0x04,
@@ -333,11 +325,41 @@ mod tests {
         let reason = unsupported_reason(unavailable_curve.pace_infos()[0]).unwrap();
         assert!(reason.contains("BrainpoolP512r1"), "{}", reason);
 
-        // And one we can actually run.
-        let supported = parse(vec![
+        // A parameter ID the standard reserves for future use.
+        let reserved = parse(vec![
             0x31, 0x14, 0x30, 0x12, 0x06, 0x0A, 0x04, 0x00, 0x7F, 0x00, 0x07, 0x02, 0x02, 0x04,
-            0x02, 0x02, 0x02, 0x01, 0x02, 0x02, 0x01, 0x0D,
+            0x02, 0x02, 0x02, 0x01, 0x02, 0x02, 0x01, 0x05,
         ]);
-        assert!(unsupported_reason(supported.pace_infos()[0]).is_none());
+        let reason = unsupported_reason(reserved.pace_infos()[0]).unwrap();
+        assert!(reason.contains("reserved for future use"), "{}", reason);
+
+        // And ones we can actually run, including Chip Authentication Mapping.
+        for mapping_arc in [0x02u8, 0x04, 0x06] {
+            let supported = parse(vec![
+                0x31,
+                0x14,
+                0x30,
+                0x12,
+                0x06,
+                0x0A,
+                0x04,
+                0x00,
+                0x7F,
+                0x00,
+                0x07,
+                0x02,
+                0x02,
+                0x04,
+                mapping_arc,
+                0x02,
+                0x02,
+                0x01,
+                0x02,
+                0x02,
+                0x01,
+                0x0D,
+            ]);
+            assert!(unsupported_reason(supported.pace_infos()[0]).is_none());
+        }
     }
 }

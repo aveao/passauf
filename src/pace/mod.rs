@@ -8,6 +8,7 @@ pub mod password;
 
 use iso7816_tlv::ber;
 use simplelog::{debug, info, warn};
+use std::collections::HashMap;
 
 use crate::helpers;
 use crate::iso7816;
@@ -28,6 +29,8 @@ const TAG_EPHEMERAL_PUBLIC_KEY_OUT: u16 = 0x83;
 const TAG_EPHEMERAL_PUBLIC_KEY_IN: u16 = 0x84;
 const TAG_AUTHENTICATION_TOKEN_OUT: u16 = 0x85;
 const TAG_AUTHENTICATION_TOKEN_IN: u16 = 0x86;
+/// Only present when Chip Authentication Mapping is used.
+const TAG_ENCRYPTED_CHIP_AUTHENTICATION_DATA: u16 = 0x8A;
 
 /// Tag of the public key data object the authentication token is computed over
 /// (ICAO 9303 p11 section 9.4.5).
@@ -65,6 +68,48 @@ impl std::fmt::Display for PaceError {
                 "PACE authentication failed, the password is most likely wrong"
             ),
         };
+    }
+}
+
+/// A Chip Authentication Mapping check that is waiting on the chip's static
+/// public key.
+///
+/// PACE-CAM gives us the chip's Chip Authentication Data during the handshake,
+/// but verifying it needs the static key from DG14, which only becomes readable
+/// once secure messaging is up. So the check is carried out of PACE and run
+/// afterwards.
+#[derive(Debug)]
+pub struct PendingChipAuthentication {
+    curve: EcCurve,
+    /// The decrypted `CA_IC = SK_IC^-1 * SK_Map,IC mod n`.
+    chip_authentication_data: Vec<u8>,
+    /// The chip's ephemeral mapping public key from step 2.
+    chip_mapping_public_key: Vec<u8>,
+}
+
+impl PendingChipAuthentication {
+    /// Verify `PK_Map,IC = KA(CA_IC, PK_IC)` (ICAO 9303 p11 section 4.4.3.5.2).
+    ///
+    /// A pass proves the chip holds the private key belonging to `public_key`.
+    /// It says nothing about whether that key is itself trustworthy, which is
+    /// what Passive Authentication is for.
+    pub fn verify(&self, public_key: &[u8]) -> bool {
+        let ops = match ecdh::ops_for(self.curve) {
+            Some(ops) => ops,
+            None => return false,
+        };
+        // Reject a key that isn't even on the curve before multiplying by it.
+        if !ops.validate_point(public_key) {
+            return false;
+        }
+        return match ops.multiply(public_key, &self.chip_authentication_data) {
+            Some(result) => result == self.chip_mapping_public_key,
+            None => false,
+        };
+    }
+
+    pub fn curve(&self) -> EcCurve {
+        return self.curve;
     }
 }
 
@@ -128,7 +173,7 @@ fn encode_tlv(tag: u16, value: Vec<u8>) -> Vec<u8> {
     return helpers::encode_ber(&[tag as u8], &value);
 }
 
-/// Send one GENERAL AUTHENTICATE and pull a data object out of the response.
+/// Send one GENERAL AUTHENTICATE and pull one data object out of the response.
 ///
 /// `expected_tag` is the context specific tag the chip should answer with.
 fn exchange_step(
@@ -137,6 +182,24 @@ fn exchange_step(
     expected_tag: u16,
     is_last: bool,
 ) -> Result<Vec<u8>, PaceError> {
+    let objects = exchange_step_objects(smartcard, request, is_last)?;
+    return objects.get(&expected_tag).cloned().ok_or_else(|| {
+        PaceError::Protocol(format!(
+            "Response has no data object with tag {:02X}",
+            expected_tag
+        ))
+    });
+}
+
+/// Send one GENERAL AUTHENTICATE and return every data object in the response.
+///
+/// The last step of PACE-CAM answers with more than one, so the caller needs
+/// them all.
+fn exchange_step_objects(
+    smartcard: &mut Box<impl Smartcard + ?Sized>,
+    request: Vec<u8>,
+    is_last: bool,
+) -> Result<HashMap<u16, Vec<u8>>, PaceError> {
     let mut apdu = iso7816::apdu_general_authenticate(request, is_last);
     let (rapdu, status_code) = apdu.exchange(smartcard, false);
 
@@ -162,14 +225,11 @@ fn exchange_step(
         ));
     }
 
-    let inner = helpers::get_tlv_constructed_value(&parsed);
-    let wanted = helpers::get_tlv_by_tag(&inner, expected_tag).ok_or_else(|| {
-        PaceError::Protocol(format!(
-            "Response has no data object with tag {:02X}",
-            expected_tag
-        ))
-    })?;
-    return Ok(helpers::get_tlv_value_bytes(wanted));
+    let mut objects: HashMap<u16, Vec<u8>> = HashMap::new();
+    for tlv in helpers::get_tlv_constructed_value(&parsed).iter() {
+        objects.insert(helpers::get_tlv_tag(tlv), helpers::get_tlv_value_bytes(tlv));
+    }
+    return Ok(objects);
 }
 
 /// Build the public key data object the authentication token is computed over
@@ -276,11 +336,13 @@ pub fn select_pace_info(pace_infos: &[&PaceInfo]) -> Result<PaceInfo, PaceError>
 }
 
 /// Run PACE and return the secure messaging session it establishes.
+/// Returns the session, plus a Chip Authentication check to run once DG14 has
+/// been read, when the document used Chip Authentication Mapping.
 pub fn do_pace_authentication(
     smartcard: &mut Box<impl Smartcard + ?Sized>,
     pace_info: &PaceInfo,
     pace_password: &Password,
-) -> Result<SecureMessaging, PaceError> {
+) -> Result<(SecureMessaging, Option<PendingChipAuthentication>), PaceError> {
     let algorithm = pace_info.algorithm;
     let cipher = algorithm.cipher;
     info!("<d>Starting PACE with {}</>", algorithm);
@@ -335,9 +397,14 @@ pub fn do_pace_authentication(
     let nonce_s = cbc_decrypt_zero_iv(cipher, &kpi, &encrypted_nonce);
     debug!("nonce s: {:02x?}", nonce_s);
 
-    // Step 2: map the nonce to a fresh generator.
+    // Step 2: map the nonce to a fresh generator. Chip Authentication Mapping
+    // needs the chip's mapping key again in step 4.
+    let mut chip_mapping_public_key: Option<Vec<u8>> = None;
     let mapped_generator = match algorithm.mapping {
-        Mapping::Generic => {
+        // 4.4.3.3.3: the mapping phase of PACE-CAM is identical to the Generic
+        // Mapping's. CAM only differs in what the chip sends back in step 4,
+        // which is checked against the mapping key kept here.
+        Mapping::Generic | Mapping::ChipAuthentication => {
             let standard_generator = agreement.standard_generator();
             let (mapping_secret, mapping_public) = agreement
                 .generate_keypair(&standard_generator)
@@ -356,6 +423,7 @@ pub fn do_pace_authentication(
                     "The chip's mapping public key is invalid.".to_string(),
                 ));
             }
+            chip_mapping_public_key = Some(peer_mapping_public.clone());
 
             agreement
                 .map_generic(&nonce_s, &mapping_secret, &peer_mapping_public)
@@ -377,11 +445,6 @@ pub fn do_pace_authentication(
             )?;
 
             map_integrated(&agreement, cipher, &nonce_s, &nonce_t)?
-        }
-        Mapping::ChipAuthentication => {
-            return Err(PaceError::NoSupportedAlgorithm(
-                "Chip Authentication Mapping (PACE-CAM) is not implemented".to_string(),
-            ));
         }
     };
     debug!("mapped generator: {:02x?}", mapped_generator);
@@ -437,19 +500,65 @@ pub fn do_pace_authentication(
         &ephemeral_public,
     ));
 
-    let token_ic = exchange_step(
+    let response = exchange_step_objects(
         smartcard,
         encode_tlv(TAG_AUTHENTICATION_TOKEN_OUT, token_ifd),
-        TAG_AUTHENTICATION_TOKEN_IN,
         true,
     )?;
 
-    if token_ic != expected_token_ic {
+    let token_ic = response.get(&TAG_AUTHENTICATION_TOKEN_IN).ok_or_else(|| {
+        PaceError::Protocol("Response carries no authentication token.".to_string())
+    })?;
+    if *token_ic != expected_token_ic {
         return Err(PaceError::AuthenticationFailed);
     }
 
+    // 4.4.5: the Encrypted Chip Authentication Data must be present for CAM and
+    // must not be present otherwise.
+    let pending_chip_authentication = match algorithm.mapping {
+        Mapping::ChipAuthentication => {
+            let encrypted = response
+                .get(&TAG_ENCRYPTED_CHIP_AUTHENTICATION_DATA)
+                .ok_or_else(|| {
+                    PaceError::Protocol(
+                        "Chip Authentication Mapping was used but the chip sent no \
+                         Encrypted Chip Authentication Data."
+                            .to_string(),
+                    )
+                })?;
+            let chip_authentication_data = sm
+                .decrypt_chip_authentication_data(encrypted)
+                .ok_or_else(|| {
+                    PaceError::Protocol(
+                        "Could not decrypt the Chip Authentication Data.".to_string(),
+                    )
+                })?;
+
+            let curve = match parameter {
+                DomainParameter::Ec(curve) => curve,
+                // CAM is ECDH-only, and selection already enforced that the
+                // OID and the domain parameters agree.
+                DomainParameter::Modp(_) => {
+                    return Err(PaceError::Crypto(
+                        "Chip Authentication Mapping cannot be used with a MODP group.".to_string(),
+                    ))
+                }
+            };
+
+            Some(PendingChipAuthentication {
+                curve,
+                chip_authentication_data,
+                // Recorded during the mapping step above.
+                chip_mapping_public_key: chip_mapping_public_key.ok_or_else(|| {
+                    PaceError::Crypto("The chip sent no mapping public key.".to_string())
+                })?,
+            })
+        }
+        _ => None,
+    };
+
     info!("Successfully authenticated!");
-    return Ok(sm);
+    return Ok((sm, pending_chip_authentication));
 }
 
 /// The Integrated Mapping, for whichever key agreement is in use.
@@ -487,7 +596,7 @@ pub fn try_pace(
     smartcard: &mut Box<impl Smartcard + ?Sized>,
     pace_infos: &[&PaceInfo],
     pace_password: &Password,
-) -> Option<SecureMessaging> {
+) -> Option<(SecureMessaging, Option<PendingChipAuthentication>)> {
     let pace_info = match select_pace_info(pace_infos) {
         Ok(pace_info) => pace_info,
         Err(error) => {
@@ -497,7 +606,7 @@ pub fn try_pace(
     };
 
     return match do_pace_authentication(smartcard, &pace_info, pace_password) {
-        Ok(sm) => Some(sm),
+        Ok(result) => Some(result),
         Err(error) => {
             warn!("{}", error);
             None
@@ -651,6 +760,124 @@ mod tests {
         );
     }
 
+    /// ICAO 9303 p11 Appendix I, the Chip Authentication step.
+    ///
+    /// Every value here is quoted by the appendix, so this exercises the whole
+    /// CAM check: decrypt the chip's data under the session key, then confirm
+    /// it maps the static key onto the mapping key.
+    fn worked_example_chip_authentication() -> (PendingChipAuthentication, Vec<u8>) {
+        let pending = PendingChipAuthentication {
+            curve: EcCurve::BrainpoolP256r1,
+            chip_authentication_data: hex(
+                "85DC3FA93D0952BFA82F5FD189EE75BD82F11D1F0B8ED4BF5319AC9B53C426B3",
+            ),
+            chip_mapping_public_key: point(
+                "A234236AA9B9621E8EFB73B5245C0E09D2576E5277183C1208BDD55280CAE8B3",
+                "04F365713A356E65A451E165ECC9AC0AC46E3771342C8FE5AEDD092685338E23",
+            ),
+        };
+        let static_public_key = point(
+            "1872709494399E7470A6431BE25E83EEE24FEA568C2ED28DB48E05DB3A610DC8",
+            "84D256A40E35EFCB59BF6753D3A489D28C7A4D973C2DA138A6E7A4A08F68E16F",
+        );
+        return (pending, static_public_key);
+    }
+
+    #[test]
+    fn chip_authentication_verifies_worked_example() {
+        let (pending, static_public_key) = worked_example_chip_authentication();
+        assert!(pending.verify(&static_public_key));
+    }
+
+    /// A different key, or a tampered one, must not pass.
+    #[test]
+    fn chip_authentication_rejects_the_wrong_key() {
+        let (pending, static_public_key) = worked_example_chip_authentication();
+
+        // Another valid point on the same curve, from Appendix G.1.
+        let unrelated = point(
+            "824FBA91C9CBE26BEF53A0EBE7342A3BF178CEA9F45DE0B70AA601651FBA3F57",
+            "30D8C879AAA9C9F73991E61B58F4D52EB87A0A0C709A49DC63719363CCD13C54",
+        );
+        assert!(!pending.verify(&unrelated));
+
+        // A point that isn't on the curve at all.
+        let mut off_curve = static_public_key.clone();
+        let last = off_curve.len() - 1;
+        off_curve[last] ^= 0x01;
+        assert!(!pending.verify(&off_curve));
+
+        // Garbage.
+        assert!(!pending.verify(&[]));
+        assert!(!pending.verify(&[0x04, 0x00]));
+    }
+
+    /// The full path: the encrypted blob the chip sent, decrypted under the
+    /// session key from the appendix, must verify.
+    #[test]
+    fn chip_authentication_end_to_end_from_encrypted_data() {
+        let ks_enc = hex("0A9DA4DB03BDDE39FC5202BC44B2E89E");
+        let sm = SecureMessaging::new(SmAlgorithm::Aes128, ks_enc, vec![0x11u8; 16]);
+        let encrypted = hex(
+            "1EEA964DAAE372AC990E3EFDE6333353BFC89A6704D93DA8798CF77F5B7A54BD
+             10CBA372B42BE0B9B5F28AA8DE2F4F92",
+        );
+
+        let pending = PendingChipAuthentication {
+            curve: EcCurve::BrainpoolP256r1,
+            chip_authentication_data: sm.decrypt_chip_authentication_data(&encrypted).unwrap(),
+            chip_mapping_public_key: point(
+                "A234236AA9B9621E8EFB73B5245C0E09D2576E5277183C1208BDD55280CAE8B3",
+                "04F365713A356E65A451E165ECC9AC0AC46E3771342C8FE5AEDD092685338E23",
+            ),
+        };
+        let static_public_key = point(
+            "1872709494399E7470A6431BE25E83EEE24FEA568C2ED28DB48E05DB3A610DC8",
+            "84D256A40E35EFCB59BF6753D3A489D28C7A4D973C2DA138A6E7A4A08F68E16F",
+        );
+        assert!(pending.verify(&static_public_key));
+    }
+
+    /// Appendix I's authentication tokens, which use the CAM OID.
+    #[test]
+    fn chip_authentication_mapping_tokens_match_worked_example() {
+        let algorithm = pace_info(0x06, 0x02, Some(13)).algorithm;
+        let agreement = brainpool_agreement();
+
+        let shared_secret = hex("67950559D0C06B4D4B86972D14460837461087F8419FDBC36AAF6CEAAC462832");
+        let ks_enc = kdf(SmAlgorithm::Aes128, &shared_secret, 1);
+        let ks_mac = kdf(SmAlgorithm::Aes128, &shared_secret, 2);
+        assert_eq!(ks_enc, hex("0A9DA4DB03BDDE39FC5202BC44B2E89E"));
+        assert_eq!(ks_mac, hex("4B1C06491ED5140CA2B537D344C6C0B1"));
+
+        let sm = SecureMessaging::new(SmAlgorithm::Aes128, ks_enc, ks_mac);
+        let chip_public = point(
+            "02AD566F3C6EC7F9324509AD50A51FA52030782A4968FCFEDF737DAEA9933331",
+            "11C3B9B4C2287789BD137E7F8AA882E2A3C633CCD6ECC2C63C57AD401A09C2E1",
+        );
+        let terminal_public = point(
+            "446C934084D9DAB863944F219520076C29EE3F7AE6722B11FF319EC1C7728F95",
+            "5483400BFF60BF0C5929270009277DC2A515E12575010AD9BA916CF1BF86FEFC",
+        );
+
+        assert_eq!(
+            sm.mac_with_internal_padding(&authentication_token_input(
+                &algorithm,
+                &agreement,
+                &chip_public
+            )),
+            hex("E86BD06018A1CD3B")
+        );
+        assert_eq!(
+            sm.mac_with_internal_padding(&authentication_token_input(
+                &algorithm,
+                &agreement,
+                &terminal_public
+            )),
+            hex("8596CF055C67C1A3")
+        );
+    }
+
     /// MSE:Set AT must serialize exactly as Appendix G.1 shows it.
     #[test]
     fn mse_set_at_matches_worked_example() {
@@ -741,22 +968,34 @@ mod tests {
     /// Selection skips what we cannot run and takes the first usable entry.
     #[test]
     fn selects_a_supported_variant() {
-        let cam = pace_info(0x06, 0x02, Some(13));
+        // BrainpoolP512r1 has no Rust implementation, so the second entry wins.
+        let unavailable_curve = pace_info(0x02, 0x02, Some(17));
         let generic = pace_info(0x02, 0x02, Some(13));
-        let selected = select_pace_info(&[&cam, &generic]).unwrap();
+        let selected = select_pace_info(&[&unavailable_curve, &generic]).unwrap();
         assert_eq!(selected.algorithm.mapping, Mapping::Generic);
+        assert_eq!(selected.parameter_id, Some(13));
+    }
+
+    /// Chip Authentication Mapping is implemented, so it is selectable rather
+    /// than skipped.
+    #[test]
+    fn selects_chip_authentication_mapping() {
+        let cam = pace_info(0x06, 0x02, Some(13));
+        let selected = select_pace_info(&[&cam]).unwrap();
+        assert_eq!(selected.algorithm.mapping, Mapping::ChipAuthentication);
     }
 
     /// A document offering only variants we lack must say what it wanted.
     #[test]
     fn rejects_a_document_with_only_unsupported_variants() {
-        let cam = pace_info(0x06, 0x02, Some(13));
         // BrainpoolP512r1, which has no Rust implementation.
         let unavailable_curve = pace_info(0x02, 0x02, Some(17));
-        let error = select_pace_info(&[&cam, &unavailable_curve]).unwrap_err();
+        // A parameter ID the standard reserves.
+        let reserved = pace_info(0x02, 0x02, Some(5));
+        let error = select_pace_info(&[&unavailable_curve, &reserved]).unwrap_err();
         let message = format!("{}", error);
-        assert!(message.contains("PACE-CAM"), "{}", message);
         assert!(message.contains("BrainpoolP512r1"), "{}", message);
+        assert!(message.contains("reserved for future use"), "{}", message);
     }
 
     /// An ECDH OID paired with a MODP group is nonsense and must be caught.
