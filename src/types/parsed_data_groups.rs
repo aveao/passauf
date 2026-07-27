@@ -73,6 +73,16 @@ pub struct EFDG7 {
 
 #[cfg(feature = "pace")]
 #[derive(Debug)]
+pub struct EFCardSecurity {
+    // ICAO 9303 part 11, section 9.2
+    /// The chip's Chip Authentication public keys. ICAO 9303 p11 Appendix I
+    /// takes the PACE-CAM key from here rather than DG14.
+    pub chip_authentication_public_keys:
+        Vec<crate::types::ef_cardaccess::ChipAuthenticationPublicKeyInfo>,
+}
+
+#[cfg(feature = "pace")]
+#[derive(Debug)]
 pub struct EFDG14 {
     // ICAO 9303 part 10, edition 8, 4.7.14
     /// The chip's static Chip Authentication public keys, which PACE-CAM
@@ -125,6 +135,8 @@ pub enum ParsedDataGroup {
     EFCom(EFCom),
     #[cfg(feature = "pace")]
     EFCardAccess(crate::types::ef_cardaccess::EFCardAccess),
+    #[cfg(feature = "pace")]
+    EFCardSecurity(EFCardSecurity),
     #[cfg(feature = "pace")]
     EFDG14(EFDG14),
     EFDG1(EFDG1),

@@ -1,5 +1,7 @@
 #[cfg(feature = "pace")]
 pub mod ef_cardaccess;
+#[cfg(feature = "pace")]
+pub mod ef_cardsecurity;
 pub mod ef_com;
 pub mod ef_dg1;
 pub mod ef_dg11;
@@ -11,3 +13,5 @@ pub mod ef_dg5;
 pub mod ef_dg7;
 pub mod generic;
 pub mod helpers;
+#[cfg(feature = "pace")]
+pub mod security_infos;

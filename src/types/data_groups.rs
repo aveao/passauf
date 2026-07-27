@@ -39,6 +39,9 @@ pub static DATA_GROUPS: [DataGroup; 22] = [
         pace_only: true,
         eac_only: false,
         in_lds1: false,
+        #[cfg(feature = "pace")]
+        parser: dg_parsers::ef_cardsecurity::parser,
+        #[cfg(not(feature = "pace"))]
         parser: dg_parsers::generic::parser,
         dumper: dg_parsers::generic::dumper,
         is_binary: false,

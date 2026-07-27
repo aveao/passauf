@@ -11,6 +11,8 @@ mod smartcard_abstractions;
 mod types;
 
 use clap::Parser;
+#[cfg(feature = "pace")]
+use simplelog::debug;
 use simplelog::{error, info, warn, CombinedLogger, TermLogger};
 use smartcard_abstractions::ReaderInterface;
 use std::path::PathBuf;
@@ -75,13 +77,11 @@ struct CliArgs {
 #[cfg(feature = "pace")]
 fn verify_chip_authentication(
     pending: &pace::PendingChipAuthentication,
-    dg14: &types::EFDG14,
+    keys: &[types::ef_cardaccess::ChipAuthenticationPublicKeyInfo],
+    source: &str,
 ) -> bool {
-    if dg14.chip_authentication_public_keys.is_empty() {
-        warn!(
-            "Chip Authentication Mapping was used, but DG14 offers no chip authentication \
-             public key, so the chip's genuineness is unverified."
-        );
+    if keys.is_empty() {
+        debug!("{} offers no chip authentication public key.", source);
         return false;
     }
 
@@ -91,11 +91,12 @@ fn verify_chip_authentication(
     // one, and then there is no ID to compare. verify() validates the point
     // against the curve PACE ran over anyway, so a key that belongs to some
     // other curve is rejected there.
-    for key_info in dg14.chip_authentication_public_keys.iter() {
+    for key_info in keys.iter() {
         if pending.verify(&key_info.public_key) {
             info!(
                 "<green>Chip Authentication passed</> (the chip holds the private key for its \
-                 DG14 key on {}).",
+                 {} key on {}).",
+                source,
                 pending.curve()
             );
             info!(
@@ -106,9 +107,10 @@ fn verify_chip_authentication(
         }
     }
 
-    warn!(
-        "Chip Authentication FAILED: no DG14 public key matches the chip's mapping key. \
-         The chip may not be genuine."
+    debug!(
+        "No key in {} matches the chip's mapping key ({} tried).",
+        source,
+        keys.len()
     );
     return false;
 }
@@ -196,6 +198,8 @@ fn main() {
     // Read all files under the master file
     for dg_info in types::DATA_GROUPS.iter() {
         if dg_info.name == "EF.CardAccess"
+            // EF.CardSecurity needs PACE, so it is read further down.
+            || dg_info.name == "EF.CardSecurity"
             || dg_info.in_lds1
             || (dg_info.pace_only && !pace_available)
         {
@@ -209,13 +213,13 @@ fn main() {
         );
     }
 
-    // Select eMRTD applet
-    info!("Selecting eMRTD LDS1 applet");
-    let _ = iso7816::apdu_select_file_by_name(icao9303::AID_MRTD_LDS1.to_vec())
-        .exchange(&mut smartcard, true);
-
     // Authenticate, preferring PACE when the document offers a variant we can
     // run, and falling back to BAC otherwise.
+    //
+    // PACE runs here, before the eMRTD applet is selected, which is the order
+    // ICAO 9303 p11 Appendix J gives and which leaves the master file selected
+    // so EF.CardSecurity can be read afterwards. BAC is the other way round: it
+    // authenticates against the applet, so that path selects it first.
     #[cfg(feature = "pace")]
     let pace_session = match (pace_available, &card_access) {
         (true, Some(card_access)) => {
@@ -261,13 +265,48 @@ fn main() {
     let mut pending_chip_authentication = None;
 
     let mut sm = match pace_session {
-        Some((sm, pending)) => {
+        Some((mut sm, pending)) => {
             #[cfg(feature = "pace")]
             {
                 pending_chip_authentication = pending;
+
+                // Still at the master file, and secure messaging is up, so this
+                // is the one moment EF.CardSecurity can be read. It is where
+                // ICAO 9303 p11 Appendix I takes the PACE-CAM key from, and a
+                // document can publish a key here that DG14 never mentions.
+                if pending_chip_authentication.is_some() {
+                    let (_, _, parsed_card_security) = helpers::secure_read_file_by_name(
+                        &mut smartcard,
+                        DataGroupEnum::EFCardSecurity,
+                        &filename_distinguisher,
+                        &args.dump_path,
+                        Some(&mut sm),
+                    );
+                    if let Some(types::ParsedDataGroup::EFCardSecurity(ref card_security)) =
+                        parsed_card_security
+                    {
+                        if let Some(pending) = pending_chip_authentication.take() {
+                            if verify_chip_authentication(
+                                &pending,
+                                &card_security.chip_authentication_public_keys,
+                                "EF.CardSecurity",
+                            ) {
+                                // Verified, so nothing is left pending.
+                            } else {
+                                // DG14 gets a turn once we are inside LDS1.
+                                pending_chip_authentication = Some(pending);
+                            }
+                        }
+                    }
+                }
             }
             #[cfg(not(feature = "pace"))]
             let _ = pending;
+
+            // Selecting the applet now happens over secure messaging.
+            info!("Selecting eMRTD LDS1 applet");
+            let _ = iso7816::apdu_select_file_by_name(icao9303::AID_MRTD_LDS1.to_vec())
+                .secure_exchange(&mut smartcard, true, Some(&mut sm));
             sm
         }
         None => {
@@ -282,6 +321,11 @@ fn main() {
             if pace_available {
                 warn!("Falling back to BAC.");
             }
+            // BAC authenticates against the applet, so it has to be selected
+            // first, and plainly.
+            info!("Selecting eMRTD LDS1 applet");
+            let _ = iso7816::apdu_select_file_by_name(icao9303::AID_MRTD_LDS1.to_vec())
+                .exchange(&mut smartcard, true);
             icao9303::do_bac_authentication(
                 &mut smartcard,
                 &args.document_number.as_ref().unwrap(),
@@ -334,7 +378,16 @@ fn main() {
         if let Some(pending) = pending_chip_authentication.take() {
             match parsed_data {
                 Some(types::ParsedDataGroup::EFDG14(ref dg14)) => {
-                    verify_chip_authentication(&pending, dg14);
+                    if !verify_chip_authentication(
+                        &pending,
+                        &dg14.chip_authentication_public_keys,
+                        "DG14",
+                    ) {
+                        warn!(
+                            "Chip Authentication FAILED: no key in EF.CardSecurity or DG14 \
+                             matches the chip's mapping key. The chip may not be genuine."
+                        );
+                    }
                 }
                 // Not DG14, so keep waiting.
                 _ => pending_chip_authentication = Some(pending),
