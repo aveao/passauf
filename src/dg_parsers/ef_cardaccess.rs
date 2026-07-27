@@ -363,3 +363,34 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod dispatch_tests {
+    use crate::types;
+
+    /// main() reaches the parser through the data group table, not by calling
+    /// it directly, so the table wiring needs its own test.
+    ///
+    /// These are the exact EF.CardAccess bytes from a Reiseausweis für
+    /// Ausländer: PACE-ECDH-GM-AES128 and PACE-ECDH-CAM-AES128, both on
+    /// BrainpoolP256r1.
+    #[test]
+    fn table_dispatches_to_the_real_parser() {
+        let dg_info = &types::DATA_GROUPS[types::DataGroupEnum::EFCardAccess as usize];
+        let data = vec![
+            0x31, 0x28, 0x30, 0x12, 0x06, 0x0a, 0x04, 0x00, 0x7f, 0x00, 0x07, 0x02, 0x02, 0x04,
+            0x02, 0x02, 0x02, 0x01, 0x02, 0x02, 0x01, 0x0d, 0x30, 0x12, 0x06, 0x0a, 0x04, 0x00,
+            0x7f, 0x00, 0x07, 0x02, 0x02, 0x04, 0x06, 0x02, 0x02, 0x01, 0x02, 0x02, 0x01, 0x0d,
+        ];
+
+        let parsed = (dg_info.parser)(&data, dg_info, false)
+            .expect("the table must reach a parser that understands EF.CardAccess");
+        match parsed {
+            types::ParsedDataGroup::EFCardAccess(card_access) => {
+                assert!(card_access.supports_pace());
+                assert_eq!(card_access.pace_infos().len(), 2);
+            }
+            other => panic!("Expected EFCardAccess but got {:?}", other),
+        }
+    }
+}
