@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A passport book with the contactless mark on it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,28h34a6,6 0 0 1 6,6v40a6,6 0 0 1 -6,6h-34a6,6 0 0 1 -6,-6v-40a6,6 0 0 1 6,-6z" />
+    <path
+        android:fillColor="#1B5E7E"
+        android:pathData="M46,44a1,1 0 0 1 0,0m0,0c4,-4 12,-4 16,0l-3,3c-3,-3 -7,-3 -10,0z" />
+    <path
+        android:fillColor="#1B5E7E"
+        android:pathData="M50,51c2,-2 6,-2 8,0l-3,3c-1,-1 -1,-1 -2,0z" />
+    <path
+        android:fillColor="#1B5E7E"
+        android:pathData="M42,37h22v3h-22z" />
+    <path
+        android:fillColor="#1B5E7E"
+        android:pathData="M42,62h22v3h-22zM42,68h22v3h-22z" />
+</vector>

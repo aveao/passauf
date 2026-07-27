@@ -1,0 +1,8 @@
+local.properties
+.gradle/
+build/
+app/build/
+# Cross-compiled by build-rust.sh; not worth keeping in the repo.
+app/src/main/jniLibs/
+.idea/
+*.iml

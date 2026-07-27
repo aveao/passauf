@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose draws everything, so the platform theme only has to get the
+         window out of the way before the first frame. -->
+    <style name="Theme.Passauf" parent="android:Theme.Material.NoActionBar" />
+</resources>

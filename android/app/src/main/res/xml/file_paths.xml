@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Where a read writes the document's files. Nothing else is shared. -->
+    <files-path
+        name="documents"
+        path="documents/" />
+    <!-- Where the log goes when a read failed before it had a directory. -->
+    <cache-path
+        name="logs"
+        path="/" />
+</paths>
