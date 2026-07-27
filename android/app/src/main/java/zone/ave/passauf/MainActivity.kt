@@ -141,8 +141,12 @@ private fun PassaufApp(viewModel: ReaderViewModel, nfcEnabled: Boolean) {
             is ReadState.Finished -> ResultScreen(
                 report = current.report,
                 directory = current.directory,
+                keyKind = current.keyKind,
                 filesOnDisk = current.filesOnDisk,
                 onDone = viewModel::backToForm,
+                // Straight back to waiting for a tag, with the details the user
+                // already entered: a lost connection needs no re-typing.
+                onRetry = viewModel::armScanner,
                 onDiscardFiles = viewModel::discardFiles,
                 modifier = modifier,
             )

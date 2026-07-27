@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Warning
@@ -58,6 +59,7 @@ import zone.ave.passauf.Detail
 import zone.ave.passauf.DocumentDetails
 import zone.ave.passauf.DocumentReport
 import zone.ave.passauf.FileReport
+import zone.ave.passauf.KeyKind
 import zone.ave.passauf.PassaufNative
 import zone.ave.passauf.Sharing
 import java.io.File
@@ -72,8 +74,10 @@ private val LOCAL_DATE: DateTimeFormatter =
 fun ResultScreen(
     report: DocumentReport,
     directory: File?,
+    keyKind: KeyKind,
     filesOnDisk: Boolean,
     onDone: () -> Unit,
+    onRetry: () -> Unit,
     onDiscardFiles: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -92,7 +96,7 @@ fun ResultScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         if (!report.ok) {
-            item { FailureCard(report) }
+            item { FailureCard(report, keyKind, onRetry) }
         }
 
         report.document?.let { document ->
@@ -163,7 +167,7 @@ fun ResultScreen(
 }
 
 @Composable
-private fun FailureCard(report: DocumentReport) {
+private fun FailureCard(report: DocumentReport, keyKind: KeyKind, onRetry: () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.errorContainer,
@@ -176,8 +180,30 @@ private fun FailureCard(report: DocumentReport) {
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
-                "A wrong document number, date of birth or date of expiry is by far the most " +
-                    "likely cause; the chip cannot tell you which one was wrong.",
+                // Naming the wrong fields would send someone checking a CAN
+                // they never entered.
+                when (keyKind) {
+                    KeyKind.MRZ ->
+                        "A wrong document number, date of birth or date of expiry is the most " +
+                            "likely cause, and the chip cannot tell you which of the three it " +
+                            "was. It is also possible the connection was lost: a document that " +
+                            "shifts out of range part way through looks the same from here."
+                    KeyKind.CAN ->
+                        "A wrong CAN is the most likely cause — it is the short number " +
+                            "printed on the document, not the document number. It is also " +
+                            "possible the connection was lost: a document that shifts out of " +
+                            "range part way through looks the same from here."
+                },
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Refresh, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Retry as-is")
+            }
+            Text(
+                "Keeps the details you entered. Hold the document flat against the back of the " +
+                    "phone and keep it still.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }

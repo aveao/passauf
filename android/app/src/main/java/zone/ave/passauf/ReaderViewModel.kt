@@ -76,6 +76,8 @@ sealed interface ReadState {
     data class Finished(
         val report: DocumentReport,
         val directory: File?,
+        /** What this read was unlocked with, so a failure can name the right fields. */
+        val keyKind: KeyKind,
         /** False once the read's files have been deleted, by us or by the user. */
         val filesOnDisk: Boolean = true,
     ) : ReadState
@@ -136,6 +138,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                         error = "That tag does not speak ISO-DEP, so it is not an eMRTD.",
                     ),
                     null,
+                    form.kind,
                 )
                 return@launch
             }
@@ -169,7 +172,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                         _state.value = ReadState.Reading(stage, message)
                     },
                 )
-                _state.value = ReadState.Finished(report, directory)
+                _state.value = ReadState.Finished(report, directory, form.kind)
             } catch (error: Exception) {
                 Log.e(TAG, "Read failed", error)
                 _state.value = ReadState.Finished(
@@ -178,6 +181,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                         error = error.message ?: error.javaClass.simpleName,
                     ),
                     directory,
+                    form.kind,
                 )
             } finally {
                 runCatching { isoDep.close() }
