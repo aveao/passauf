@@ -128,7 +128,9 @@ The unsupported curves are the ones with no usable Rust crate behind them. Imple
 
 PACE-CAM proves the chip holds the private key belonging to the Chip Authentication key it presents, which a cloned chip cannot do. The chip returns `CA_IC = SK_IC⁻¹ · SK_Map,IC` encrypted under the session key, and passauf checks that `CA_IC · PK_IC` reproduces the mapping key the chip used during PACE.
 
-`PK_IC` is read from **DG14**, which only becomes readable once secure messaging is up. The check is therefore deferred: PACE completes first, DG14 is read, and the verification runs afterwards. Its result is printed once DG14 has been parsed. Reading `PK_IC` from `EF.CardSecurity` instead is not implemented, as that is a CMS SignedData structure; documents carrying only `EF.CardSecurity` and no DG14 will report the check as unverified.
+`PK_IC` is read from **EF.CardSecurity**, which is where ICAO 9303 part 11 Appendix I takes it from, falling back to **DG14** for documents that publish it only there. This matters in practice: a German Reiseausweis für Ausländer publishes only its *Chip Authentication* key in DG14 and keeps the PACE-CAM key in EF.CardSecurity alone, so checking DG14 first finds nothing to match.
+
+EF.CardSecurity needs PACE and lives at the master file, so PACE runs **before** the LDS1 applet is selected — the order ICAO 9303 part 11 Appendix J gives anyway — and the applet is then selected over secure messaging. BAC still selects the applet first, since it authenticates against it. EF.CardSecurity is a CMS `SignedData`; its `SecurityInfos` are reached through the eContent, and **its signature is not verified**, which again is Passive Authentication's job.
 
 **A CAM pass is not proof the document is genuine.** It only proves the chip holds the private key for the key *it gave us*. Nothing yet establishes that key belongs to a real issuing authority — that is Passive Authentication's job, and ICAO 9303 part 11 section 4.4.3.5.2 requires PA alongside CAM for exactly this reason. passauf does not validate `EF.SOD` yet, so treat a pass as "this chip is not a naive clone" rather than "this document is real".
 

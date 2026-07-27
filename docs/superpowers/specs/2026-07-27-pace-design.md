@@ -19,8 +19,9 @@ Supported:
 - Standardized domain parameters: 0, 1, 2 (MODP), 12, 13, 15, 16, 18 (ECP)
 
 Chip Authentication Mapping was added after the initial implementation, once a document turned up
-that offers it. Its verification is deferred until DG14 has been read, since the chip's static key
-is not reachable before secure messaging is up.
+that offers it. Its verification is deferred, since the chip's static key is not reachable before
+secure messaging is up: PACE now runs before the LDS1 applet is selected, as ICAO 9303 p11
+Appendix J prescribes, so EF.CardSecurity can be read at the master file straight afterwards.
 
 Out of scope:
 
@@ -32,8 +33,8 @@ Out of scope:
 - Terminal Authentication and the 0x7F4C CHAT data object, and so EAC-protected data groups.
 - Passive Authentication. Section 4.4.3.5.2 requires it alongside CAM, so until it exists a CAM
   pass only proves the chip holds the private key for the key it presented.
-- Reading the chip's Chip Authentication key from EF.CardSecurity, which is CMS SignedData. DG14
-  is used instead.
+- Verifying EF.CardSecurity's CMS signature. Its SecurityInfos are read, but nothing establishes
+  they are authentic; that is Passive Authentication again.
 
 ## Forced dependency changes
 
