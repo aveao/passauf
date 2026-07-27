@@ -1,0 +1,19 @@
+# Dependency cooldown policy, enforced by cargo-cooldown.
+#
+# A freshly published crate version is the shape a supply chain attack takes:
+# a compromised account publishes, the world's lockfiles pick it up within
+# hours, and the yank comes later. Waiting a week means someone else finds it
+# first.
+#
+# Run `cargo cooldown check` (or build/test/run/update) instead of the bare
+# cargo command when the dependency graph changes.
+[cooldown]
+# Fail rather than quietly accepting a version that is too fresh, and put the
+# original Cargo.lock back.
+incompatible-publish-age = "deny"
+# Versions already in Cargo.lock are the floor, so a check never walks existing
+# dependencies backwards.
+lockfile-baseline = "floor"
+
+[registry]
+global-min-publish-age = "7 days"

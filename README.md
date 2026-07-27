@@ -198,7 +198,28 @@ cargo build --no-default-features --features pace
 ```
 
 The `android` feature adds JNI entry points for the app under `android/`; see
-[its README](android/README.md) for how the two halves fit together.
+[its README](android/README.md) for how the two halves fit together. The
+`jpeg2000` feature it pulls in adds a decoder for the images a document can
+carry in DG2, DG5 and DG7, which is a display convenience and is never used
+while reading or checking one.
+
+### Dependency cooldown
+
+New dependency versions wait a week before this project will take them. That is
+the window a compromised publish lives in: the account gets taken over, the
+world's lockfiles pick the release up within hours, and the yank comes later.
+The policy is in [`cooldown.toml`](cooldown.toml) and is enforced by
+[cargo-cooldown](https://crates.io/crates/cargo-cooldown):
+
+```bash
+cargo install --locked cargo-cooldown
+cargo cooldown check          # or build / test / run
+cargo cooldown update         # refresh Cargo.lock under the policy
+```
+
+Run those in place of the bare cargo command whenever the dependency graph
+changes. A version that is too fresh fails the run and leaves `Cargo.lock`
+alone rather than being quietly accepted.
 
 ## Proxmark3 support
 
