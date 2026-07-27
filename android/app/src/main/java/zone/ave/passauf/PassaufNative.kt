@@ -5,6 +5,25 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
+ * How both sides of the JNI boundary agree to spell things.
+ *
+ * Top level rather than inside [PassaufNative] so a test can use it without
+ * loading the native library.
+ */
+internal val passaufJson = Json {
+    ignoreUnknownKeys = true
+    // A null is this side saying "you decide", and the Rust side reads an
+    // absent field as its own default. Sending the null would say something
+    // else.
+    explicitNulls = false
+    // Without this, kotlinx leaves out any property still equal to its declared
+    // default, and Rust reads that absence as *its* default. That silently
+    // turned readBinaryFiles = true into false, so the image data groups were
+    // never read at all.
+    encodeDefaults = true
+}
+
+/**
  * The passauf Rust library.
  *
  * There is one call: hand it what unlocks the document and something to talk to
@@ -43,11 +62,6 @@ object PassaufNative {
         progress: ProgressListener?,
     ): String?
 
-    private val json = Json {
-        ignoreUnknownKeys = true
-        explicitNulls = false
-    }
-
     /**
      * Read a document. Blocking, and long enough (seconds) that it must not run
      * on the main thread.
@@ -57,14 +71,14 @@ object PassaufNative {
         transceiver: Transceiver,
         progress: ProgressListener? = null,
     ): DocumentReport {
-        val reportJson = nativeReadDocument(json.encodeToString(options), transceiver, progress)
+        val reportJson = nativeReadDocument(passaufJson.encodeToString(options), transceiver, progress)
             ?: return DocumentReport(
                 ok = false,
                 error = "The passauf library returned nothing at all.",
             )
 
         return try {
-            json.decodeFromString<DocumentReport>(reportJson)
+            passaufJson.decodeFromString<DocumentReport>(reportJson)
         } catch (error: Exception) {
             // A report we cannot read is still worth surfacing, since the raw
             // JSON usually says what went wrong.

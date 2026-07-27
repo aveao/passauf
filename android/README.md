@@ -26,6 +26,11 @@ transport: it holds the `IsoDep` connection and hands each APDU to the chip.
   images inside DG2, DG5 and DG7 are written out alongside them as `.jpeg` or
   `.jp2`. The results screen can share one file or all of them.
 
+Note that Android has no JPEG 2000 decoder, and many issuers encode DG2 that
+way. Such a portrait is still read, hashed and saved, it just cannot be shown;
+the app falls through to DG5's printed portrait when the document has one, and
+otherwise says the image was saved but is not displayable.
+
 There is no MRZ scanner yet. Everything is typed in by hand.
 
 ## Building

@@ -645,6 +645,80 @@ fn iso_date_from_data_group(date: &String) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// The exact key names the Android app decodes. A rename on this side
+    /// without one on that side leaves the app silently reading defaults,
+    /// which is how readBinaryFiles went missing in the first place.
+    #[test]
+    fn serializes_the_keys_the_app_expects() {
+        let report = Report {
+            ok: true,
+            authentication: Some(AuthenticationReport {
+                method: "PACE".to_string(),
+                algorithm: Some("PACE-ECDH-CAM-AES-CBC-CMAC-256".to_string()),
+            }),
+            chip_authentication: Some(ChipAuthenticationReport {
+                status: "passed".to_string(),
+                source: Some("EF.CardSecurity".to_string()),
+                curve: Some("brainpoolP256r1".to_string()),
+            }),
+            integrity: Some(IntegrityReport {
+                security_object_read: true,
+                hash_algorithm: Some("SHA-256".to_string()),
+                consistent: true,
+                checked: vec![1, 2],
+                mismatched: vec![],
+                unchecked: vec![],
+                missing_from_ef_com: vec![],
+            }),
+            document: Some(DocumentReport {
+                surname: Some("MUSTERMANN".to_string()),
+                ..Default::default()
+            }),
+            files: vec![FileReport {
+                name: "EF.DG1".to_string(),
+                description: "Details recorded in MRZ".to_string(),
+                file_id: "0x0101".to_string(),
+                present: true,
+                size: 93,
+                hash_status: "matches".to_string(),
+                expected_hash: None,
+                actual_hash: None,
+                dumped: vec!["/tmp/x-EF_DG1.bin".to_string()],
+                details: vec![Detail::new("MRZ", "P<UTO...")],
+            }],
+            portraits: vec!["/tmp/x-EF_DG2-pic1.jpeg".to_string()],
+            warnings: vec![],
+            log: vec!["INFO  Selecting EF.DG1".to_string()],
+            error: None,
+        };
+
+        let json = serde_json::to_string(&report).unwrap();
+        for key in [
+            "\"ok\"",
+            "\"authentication\"",
+            "\"chipAuthentication\"",
+            "\"integrity\"",
+            "\"securityObjectRead\"",
+            "\"hashAlgorithm\"",
+            "\"missingFromEfCom\"",
+            "\"document\"",
+            "\"surname\"",
+            "\"files\"",
+            "\"fileId\"",
+            "\"hashStatus\"",
+            "\"dumped\"",
+            "\"details\"",
+            "\"portraits\"",
+            "\"warnings\"",
+            "\"log\"",
+        ] {
+            assert!(json.contains(key), "{} missing from {}", key, json);
+        }
+        // Absent optionals are left out rather than sent as null.
+        assert!(!json.contains("\"error\""));
+        println!("{}", json);
+    }
+
     /// The app shows dates as ISO and formats them itself, so a two-digit year
     /// has to have been resolved by the time it gets there.
     #[test]

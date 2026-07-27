@@ -87,17 +87,22 @@ fun ResultScreen(
         }
 
         report.document?.let { document ->
-            item { IdentityCard(document, report.portraits.firstOrNull()) }
+            item { IdentityCard(document, report.portraits, report) }
+        }
+
+        // How the document was read and what that establishes, before the
+        // details it contained: it is the part a reader has to weigh.
+        if (report.ok) {
+            item { ValidationCard(report) }
+        }
+
+        report.document?.let { document ->
             if (document.personalDetails.isNotEmpty()) {
                 item { DetailsCard("Additional personal details", document.personalDetails) }
             }
             if (document.documentDetails.isNotEmpty()) {
                 item { DetailsCard("Additional document details", document.documentDetails) }
             }
-        }
-
-        if (report.ok) {
-            item { ValidationCard(report) }
         }
 
         if (report.warnings.isNotEmpty()) {
@@ -169,11 +174,15 @@ private fun FailureCard(report: DocumentReport) {
 }
 
 @Composable
-private fun IdentityCard(document: DocumentDetails, portraitPath: String?) {
+private fun IdentityCard(
+    document: DocumentDetails,
+    portraits: List<String>,
+    report: DocumentReport,
+) {
     Card {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.Top) {
-                Portrait(portraitPath)
+                Portrait(portraits)
                 Spacer(Modifier.width(16.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -196,6 +205,11 @@ private fun IdentityCard(document: DocumentDetails, portraitPath: String?) {
 
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
 
+            // How the chip was opened, at a glance. The checks card below says
+            // what it means; this is so it can be read without scrolling.
+            DetailRow("Read with", accessSummary(report))
+            DetailRow("Chip Authentication", chipAuthenticationSummary(report))
+
             DetailRow("Nationality", document.nationality)
             DetailRow("Issuing state", document.issuingState)
             DetailRow("Date of birth", formatDate(document.dateOfBirth))
@@ -213,10 +227,20 @@ private fun IdentityCard(document: DocumentDetails, portraitPath: String?) {
     }
 }
 
+/**
+ * The holder's portrait, from the first image the platform can actually decode.
+ *
+ * DG2 comes first in the list because it is the one a border check would use,
+ * but plenty of documents encode it as JPEG 2000, which Android has no decoder
+ * for. DG5's printed portrait is JPEG when it exists, so falling through to it
+ * shows a face where taking only the first path would show a grey box.
+ */
 @Composable
-private fun Portrait(path: String?) {
-    val bitmap = remember(path) {
-        path?.let { runCatching { BitmapFactory.decodeFile(it) }.getOrNull() }
+private fun Portrait(paths: List<String>) {
+    val bitmap = remember(paths) {
+        paths.firstNotNullOfOrNull { path ->
+            runCatching { BitmapFactory.decodeFile(path) }.getOrNull()
+        }
     }
 
     Box(
@@ -235,9 +259,9 @@ private fun Portrait(path: String?) {
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxWidth(),
             )
-            // Android decodes JPEG but not JPEG 2000, which plenty of documents
-            // use for DG2. The file is still saved, it just cannot be shown.
-            path != null -> Text(
+            // Every image the document had is in a format Android cannot
+            // decode, almost certainly JPEG 2000. They are all still saved.
+            paths.isNotEmpty() -> Text(
                 "Saved,\nbut not\ndisplayable",
                 style = MaterialTheme.typography.labelSmall,
                 textAlign = TextAlign.Center,
@@ -293,8 +317,9 @@ private fun ValidationCard(report: DocumentReport) {
                     icon = Icons.Default.CheckCircle,
                     tint = StatusColors.good,
                     title = "Authenticated with ${authentication.method}",
-                    detail = authentication.algorithm
-                        ?: "The document accepted the details you entered.",
+                    detail = authentication.algorithm?.let { "Using $it." }
+                        ?: "Basic Access Control, the older scheme. The document offered nothing " +
+                        "better, so the session key is derived from the MRZ alone.",
                 )
             }
 
@@ -303,11 +328,12 @@ private fun ValidationCard(report: DocumentReport) {
                 "passed" -> CheckRow(
                     icon = Icons.Default.CheckCircle,
                     tint = StatusColors.good,
-                    title = "Chip Authentication passed",
-                    detail = "The chip holds the private key for the key in " +
-                        "${chip.source ?: "the document"}" +
-                        (chip.curve?.let { ", on $it" } ?: "") +
-                        ". This shows the chip was not cloned, not that the key is trusted.",
+                    title = "Chip Authentication passed" +
+                        (chip.curve?.let { " on $it" } ?: ""),
+                    detail = "Run as part of ${report.authentication?.algorithm ?: "PACE"}. " +
+                        "The chip holds the private key for the key it published in " +
+                        "${chip.source ?: "the document"}, which shows it was not cloned. It " +
+                        "does not show that key is trusted.",
                 )
                 "failed" -> CheckRow(
                     icon = Icons.Default.Cancel,
@@ -579,6 +605,27 @@ private fun DetailRow(label: String, value: String?, monospaceValue: Boolean = f
             fontFamily = if (monospaceValue) FontFamily.Monospace else null,
             modifier = Modifier.weight(1f),
         )
+    }
+}
+
+/** The access mode in one line: the scheme, and for PACE the variant that ran. */
+private fun accessSummary(report: DocumentReport): String {
+    val authentication = report.authentication ?: return "Unknown"
+    return listOfNotNull(authentication.method, authentication.algorithm).joinToString(" · ")
+}
+
+/** Whether Chip Authentication ran, and over what, in one line. */
+private fun chipAuthenticationSummary(report: DocumentReport): String {
+    val chip = report.chipAuthentication ?: return "Not attempted"
+    return when (chip.status) {
+        "passed" -> listOfNotNull(
+            "Passed",
+            chip.curve,
+            chip.source?.let { "key from $it" },
+        ).joinToString(" · ")
+        "failed" -> "Failed — no published key matches the chip"
+        "noKeyAvailable" -> "Ran, but the document published no key to check"
+        else -> "Not offered by this document"
     }
 }
 

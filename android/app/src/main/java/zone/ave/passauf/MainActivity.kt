@@ -3,6 +3,7 @@ package zone.ave.passauf
 import android.nfc.NfcAdapter
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -108,6 +109,11 @@ private fun PassaufApp(viewModel: ReaderViewModel, nfcEnabled: Boolean) {
             )
         },
     ) { padding ->
+        // Every screen but the form was reached from the form, so that is where
+        // back goes. Without this the system handles it and closes the app,
+        // which throws away a read the user is still looking at.
+        BackHandler(enabled = state !is ReadState.Editing, onBack = viewModel::backToForm)
+
         val modifier = Modifier
             .fillMaxSize()
             .padding(padding)
