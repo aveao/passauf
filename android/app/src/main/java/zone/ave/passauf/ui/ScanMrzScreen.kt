@@ -16,13 +16,22 @@ import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -43,8 +52,10 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -78,6 +89,32 @@ private const val GUIDE_WIDTH_FRACTION = 0.9f
  * broken. Asking for 1080p is the difference between working and not.
  */
 private val ANALYSIS_RESOLUTION = Size(1920, 1080)
+
+/**
+ * Line lengths worth a second look, echoed from the library for the debug view alone.
+ *
+ * [zone.ave.passauf.PassaufNative.parseMrz] decides what is really a candidate, and it
+ * normalises before measuring. This is here so the overlay can point at the line that
+ * nearly worked, which is the difference between a recogniser reading nothing and one
+ * reading almost the right thing.
+ */
+private val CANDIDATE_LINE_LENGTHS = setOf(30, 36, 44)
+
+/**
+ * What the recogniser is seeing right now.
+ *
+ * A scan that never lands fails in one of a few ways, and they want different fixes:
+ * no lines at all is focus or resolution, lines of the wrong length is framing, and
+ * lines of the right length that still do not parse is character confusion, which the
+ * check digits are catching exactly as intended.
+ */
+data class ScanDiagnostics(
+    val frameWidth: Int,
+    val frameHeight: Int,
+    val framesSeen: Int,
+    val recognizeMillis: Long,
+    val lines: List<String>,
+)
 
 /**
  * Reads the machine readable zone off a document with the camera.
@@ -134,12 +171,40 @@ fun ScanMrzScreen(
         found?.let(onFound)
     }
 
+    // Off by default: this puts what is printed on the document on the screen, which is
+    // wanted while working out why a scan will not land and not otherwise.
+    var showDiagnostics by remember { mutableStateOf(false) }
+    var diagnostics by remember { mutableStateOf<ScanDiagnostics?>(null) }
+
     Box(modifier = modifier.fillMaxSize()) {
         Viewfinder(
             onFound = { scanned -> if (found == null) found = scanned },
+            onDiagnostics = { latest -> diagnostics = latest },
             modifier = Modifier.fillMaxSize(),
         )
         GuideOverlay(modifier = Modifier.fillMaxSize())
+
+        IconButton(
+            onClick = { showDiagnostics = !showDiagnostics },
+            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+        ) {
+            Icon(
+                Icons.Filled.BugReport,
+                contentDescription = if (showDiagnostics) {
+                    "Hide what the camera is reading"
+                } else {
+                    "Show what the camera is reading"
+                },
+                tint = if (showDiagnostics) Color.White else Color.White.copy(alpha = 0.5f),
+            )
+        }
+
+        if (showDiagnostics) {
+            DiagnosticsOverlay(
+                diagnostics = diagnostics,
+                modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+            )
+        }
 
         Column(
             modifier = Modifier
@@ -196,10 +261,74 @@ private fun CameraRefused(
     }
 }
 
+/**
+ * Everything the recogniser returned from the last frame that held any text.
+ *
+ * Each line carries its length, because that is the fastest way to tell which kind of
+ * failure is happening: a 44 that will not parse is a misread character, a 43 is a
+ * dropped one, and no lines at all means the camera never resolved the print.
+ */
+@Composable
+private fun DiagnosticsOverlay(
+    diagnostics: ScanDiagnostics?,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth(0.92f)
+            .heightIn(max = 260.dp)
+            .background(Color.Black.copy(alpha = 0.75f))
+            .padding(8.dp)
+            .verticalScroll(rememberScrollState()),
+    ) {
+        if (diagnostics == null) {
+            Text(
+                "Waiting for the first frame.",
+                color = Color.White,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp,
+            )
+            return@Column
+        }
+
+        Text(
+            "${diagnostics.frameWidth}x${diagnostics.frameHeight}  " +
+                "frame ${diagnostics.framesSeen}  ${diagnostics.recognizeMillis}ms",
+            color = Color.Cyan,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 11.sp,
+        )
+
+        if (diagnostics.lines.isEmpty()) {
+            Text(
+                "no text recognised",
+                color = Color.Yellow,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp,
+            )
+            return@Column
+        }
+
+        Column(modifier = Modifier.horizontalScroll(rememberScrollState())) {
+            diagnostics.lines.forEach { line ->
+                val candidate = line.length in CANDIDATE_LINE_LENGTHS
+                Text(
+                    "%3d %s".format(line.length, line),
+                    color = if (candidate) Color.Green else Color.White.copy(alpha = 0.7f),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    softWrap = false,
+                )
+            }
+        }
+    }
+}
+
 /** The camera preview, with recognition running over the frames behind it. */
 @Composable
 private fun Viewfinder(
     onFound: (PassaufNative.ScannedMrz) -> Unit,
+    onDiagnostics: (ScanDiagnostics) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -209,6 +338,7 @@ private fun Viewfinder(
     val recognizer = remember { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
     val provider = remember { mutableStateOf<ProcessCameraProvider?>(null) }
     val currentOnFound by rememberUpdatedState(onFound)
+    val currentOnDiagnostics by rememberUpdatedState(onDiagnostics)
 
     DisposableEffect(lifecycleOwner) {
         // The provider arrives whenever it arrives, which can be after this screen has
@@ -243,7 +373,15 @@ private fun Viewfinder(
                 // between what the camera sees and what gets recognised.
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
-            analysis.setAnalyzer(executor, MrzAnalyzer(recognizer, executor) { currentOnFound(it) })
+            analysis.setAnalyzer(
+                executor,
+                MrzAnalyzer(
+                    recognizer = recognizer,
+                    executor = executor,
+                    onFound = { currentOnFound(it) },
+                    onDiagnostics = { currentOnDiagnostics(it) },
+                ),
+            )
 
             cameraProvider.unbindAll()
             cameraProvider.bindToLifecycle(
@@ -301,11 +439,14 @@ private class MrzAnalyzer(
     private val recognizer: TextRecognizer,
     private val executor: Executor,
     private val onFound: (PassaufNative.ScannedMrz) -> Unit,
+    private val onDiagnostics: (ScanDiagnostics) -> Unit,
 ) : ImageAnalysis.Analyzer {
 
     /** Set once a zone has been read, so later frames stop reporting the same one. */
     @Volatile
     private var done = false
+
+    private var framesSeen = 0
 
     // Reaching for the underlying frame is what ML Kit wants, and CameraX marks that
     // access experimental rather than gating it behind opt-in.
@@ -317,12 +458,28 @@ private class MrzAnalyzer(
             return
         }
 
+        framesSeen += 1
+        val startedAt = System.nanoTime()
+        val width = proxy.width
+        val height = proxy.height
+
         recognizer.process(InputImage.fromMediaImage(frame, proxy.imageInfo.rotationDegrees))
             .addOnSuccessListener(executor) { text ->
                 if (done) {
                     return@addOnSuccessListener
                 }
                 val lines = text.textBlocks.flatMap { block -> block.lines }.map { it.text }
+
+                onDiagnostics(
+                    ScanDiagnostics(
+                        frameWidth = width,
+                        frameHeight = height,
+                        framesSeen = framesSeen,
+                        recognizeMillis = (System.nanoTime() - startedAt) / 1_000_000,
+                        lines = lines,
+                    )
+                )
+
                 PassaufNative.parseMrz(lines)?.let { scanned ->
                     done = true
                     onFound(scanned)
