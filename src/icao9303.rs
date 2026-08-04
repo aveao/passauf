@@ -51,6 +51,47 @@ pub fn append_check_digit(text: &String) -> String {
     return result;
 }
 
+/// The MRZ gives the document number a fixed width field, padded out with `<`.
+const DOCUMENT_NUMBER_MRZ_LENGTH: usize = 9;
+
+/// Pads a document number out to the width of its MRZ field.
+///
+/// Keys are derived from the MRZ *field*, not from the number as printed in the
+/// visual inspection zone, so a number shorter than nine characters has to carry
+/// its `<` filler or everything derived from it comes out wrong.
+///
+/// The check digit is the same either way, because the filler is trailing and `<`
+/// is worth zero. That is what makes forgetting this so quiet: nothing fails a
+/// checksum, the document simply refuses to open.
+///
+/// Numbers of nine characters or more are returned untouched. A TD1 number too long
+/// for the field is stitched back together from the optional data by the caller, as
+/// Doc 9303-5 requires, and is used at its full length.
+pub fn pad_document_number(document_number: &String) -> String {
+    let length = document_number.chars().count();
+    if length >= DOCUMENT_NUMBER_MRZ_LENGTH {
+        return document_number.to_owned();
+    }
+    return document_number.to_owned() + &"<".repeat(DOCUMENT_NUMBER_MRZ_LENGTH - length);
+}
+
+/// Builds the MRZ information that BAC and PACE both derive their keys from.
+///
+/// ICAO 9303 p11 section 9.7.2: the padded document number, the date of birth and
+/// the date of expiry, each followed by its own check digit.
+pub fn mrz_information(
+    document_number: &String,
+    date_of_birth: &String,
+    date_of_expiry: &String,
+) -> Vec<u8> {
+    return vec![
+        append_check_digit(&pad_document_number(document_number)).as_bytes(),
+        append_check_digit(date_of_birth).as_bytes(),
+        append_check_digit(date_of_expiry).as_bytes(),
+    ]
+    .concat();
+}
+
 /// Encrypts given data according to 3DES as used in ICAO 9303
 ///
 /// Data should be pre-padded.
@@ -174,12 +215,7 @@ pub fn calculate_bac_eifd_and_mifd(
     debug!("shared_secret: {:02x?}", shared_secret);
 
     // Concatinate MRZ with added check digits for key formation.
-    let k_mrz = vec![
-        append_check_digit(document_number).as_bytes(),
-        append_check_digit(date_of_birth).as_bytes(),
-        append_check_digit(date_of_expiry).as_bytes(),
-    ]
-    .concat();
+    let k_mrz = mrz_information(document_number, date_of_birth, date_of_expiry);
     debug!("K.mrz: {:02x?}", k_mrz);
 
     // Calculate the seed for the key
@@ -295,4 +331,99 @@ pub fn do_bac_authentication(
 
     // Unlike PACE, BAC's counter doesn't start at zero.
     return SecureMessaging::new_bac(ks_enc, ks_mac, ssc);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ICAO 9303 p11 Appendix D, the worked example for BAC. The document number
+    /// is eight characters long, so every value below depends on it being padded
+    /// out to the nine the MRZ field gives it.
+    fn worked_example_fields() -> (String, String, String) {
+        return (
+            "L898902C".to_string(),
+            "690806".to_string(),
+            "940623".to_string(),
+        );
+    }
+
+    #[test]
+    fn document_number_is_padded_to_the_mrz_field_width() {
+        assert_eq!(pad_document_number(&"L898902C".to_string()), "L898902C<");
+        assert_eq!(pad_document_number(&"12345".to_string()), "12345<<<<");
+        // Exactly nine characters is already the width of the field.
+        assert_eq!(pad_document_number(&"T22000129".to_string()), "T22000129");
+        // A TD1 number stitched back together from the optional data outgrows the
+        // field and has to be left alone.
+        assert_eq!(
+            pad_document_number(&"AB1234567890".to_string()),
+            "AB1234567890"
+        );
+    }
+
+    /// The filler is trailing and `<` is worth zero, so padding never moves the
+    /// check digit. An unpadded number therefore derives the wrong key without
+    /// anything failing a checksum on the way.
+    #[test]
+    fn padding_does_not_move_the_check_digit() {
+        assert_eq!(
+            calculate_check_digit(&"L898902C".to_string()),
+            calculate_check_digit(&"L898902C<".to_string())
+        );
+    }
+
+    #[test]
+    fn mrz_information_matches_worked_example() {
+        let (document_number, date_of_birth, date_of_expiry) = worked_example_fields();
+        assert_eq!(
+            mrz_information(&document_number, &date_of_birth, &date_of_expiry),
+            b"L898902C<369080619406236".to_vec()
+        );
+    }
+
+    /// Appendix D quotes K.enc, E.IFD and M.IFD for the randoms below. Passing the
+    /// document number in unpadded, as this did before, changes K.seed and with it
+    /// every value here.
+    #[test]
+    fn bac_key_derivation_matches_worked_example() {
+        let (document_number, date_of_birth, date_of_expiry) = worked_example_fields();
+        let rnd_ic = vec![0x46, 0x08, 0xF9, 0x19, 0x88, 0x70, 0x22, 0x12];
+        let rnd_ifd = vec![0x78, 0x17, 0x23, 0x86, 0x0C, 0x06, 0xC2, 0x26];
+        let k_ifd = vec![
+            0x0B, 0x79, 0x52, 0x40, 0xCB, 0x70, 0x49, 0xB0, 0x1C, 0x19, 0xB3, 0x3E, 0x32, 0x80,
+            0x4F, 0x0B,
+        ];
+
+        let (k_enc, e_ifd, m_ifd) = calculate_bac_eifd_and_mifd(
+            &rnd_ic,
+            &rnd_ifd,
+            &k_ifd,
+            &document_number,
+            &date_of_birth,
+            &date_of_expiry,
+        );
+
+        // Appendix D quotes K.enc with DES parity bits set. passauf leaves the
+        // low bit of each key byte as the KDF produced it, and DES drops that bit
+        // during the key schedule, so the two keys are the same key. E.IFD and
+        // M.IFD below are the proof: they go on the wire and match exactly.
+        let appendix_d_k_enc = vec![
+            0xAB, 0x94, 0xFD, 0xEC, 0xF2, 0x67, 0x4F, 0xDF, 0xB9, 0xB3, 0x91, 0xF8, 0x5D, 0x7F,
+            0x76, 0xF2,
+        ];
+        let without_parity = |key: &Vec<u8>| -> Vec<u8> {
+            return key.iter().map(|byte| byte & 0xFE).collect();
+        };
+        assert_eq!(without_parity(&k_enc), without_parity(&appendix_d_k_enc));
+        assert_eq!(
+            e_ifd,
+            vec![
+                0x72, 0xC2, 0x9C, 0x23, 0x71, 0xCC, 0x9B, 0xDB, 0x65, 0xB7, 0x79, 0xB8, 0xE8, 0xD3,
+                0x7B, 0x29, 0xEC, 0xC1, 0x54, 0xAA, 0x56, 0xA8, 0x79, 0x9F, 0xAE, 0x2F, 0x49, 0x8F,
+                0x76, 0xED, 0x92, 0xF2
+            ]
+        );
+        assert_eq!(m_ifd, vec![0x5F, 0x14, 0x48, 0xEE, 0xA8, 0xAD, 0x90, 0xA7]);
+    }
 }

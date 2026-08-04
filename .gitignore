@@ -4,3 +4,5 @@
 /*.jp2
 # ICAO 9303 PDFs, kept locally for reference.
 /standards
+# Local planning notes.
+/PRE-RELEASE-PLAN.md

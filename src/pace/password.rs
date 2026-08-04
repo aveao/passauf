@@ -42,17 +42,14 @@ impl Password {
                 date_of_birth,
                 date_of_expiry,
             } => {
-                // Same MRZ information BAC hashes: each field carries its check
-                // digit. For TD1 documents with document numbers longer than
-                // nine characters the caller is expected to have already
-                // stitched the number back together from the optional data
-                // field, as Doc 9303-5 requires.
-                let mrz_information = vec![
-                    icao9303::append_check_digit(document_number).as_bytes(),
-                    icao9303::append_check_digit(date_of_birth).as_bytes(),
-                    icao9303::append_check_digit(date_of_expiry).as_bytes(),
-                ]
-                .concat();
+                // Same MRZ information BAC hashes: the document number padded out
+                // to the width of its MRZ field, then each field followed by its
+                // check digit. For TD1 documents with document numbers longer than
+                // nine characters the caller is expected to have already stitched
+                // the number back together from the optional data field, as
+                // Doc 9303-5 requires.
+                let mrz_information =
+                    icao9303::mrz_information(document_number, date_of_birth, date_of_expiry);
                 let mut hasher = Sha1::new();
                 hasher.update(mrz_information.as_slice());
                 hasher.finalize().to_vec()
