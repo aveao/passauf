@@ -56,9 +56,10 @@ done
 
 score() {
     local model="$1" listfile="$2"
-    # lstmeval prints its summary on the last lines; pull the two rates out.
+    # lstmeval ends with a line like "BCER eval=0.008, BWER eval=0.233". Note the space
+    # before eval=: matching on "BCER=" finds nothing and reports a silent blank.
     lstmeval --model "$model" --eval_listfile "$listfile" 2>&1 \
-        | grep -oE "BCER=[0-9.]+|BWER=[0-9.]+" \
+        | grep -oE "B[CW]ER eval=[0-9.]+" \
         | tr '\n' ' '
 }
 
