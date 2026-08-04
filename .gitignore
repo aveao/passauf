@@ -10,3 +10,5 @@
 # large enough that committing them would dwarf the source.
 /tesseract-ocrb-passauf/build
 /tesseract-ocrb-passauf/target
+# text2image scribbles this next to itself.
+/tesseract-ocrb-passauf/fonts.conf
