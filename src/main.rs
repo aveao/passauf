@@ -6,6 +6,7 @@ use passauf::session::{
     self, AccessKey, Authentication, ChipAuthentication, ReadOptions, SessionError,
 };
 use passauf::smartcard_abstractions::ReaderInterface;
+use passauf::types::MRZ;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -27,7 +28,7 @@ struct CliArgs {
         short = 'b',
         long = "dob",
         value_name = "YYMMDD",
-        required_unless_present = "card_access_number"
+        required_unless_present_any = ["card_access_number", "mrz_lines"]
     )]
     date_of_birth: Option<String>,
 
@@ -36,7 +37,7 @@ struct CliArgs {
         short = 'e',
         long = "doe",
         value_name = "YYMMDD",
-        required_unless_present = "card_access_number"
+        required_unless_present_any = ["card_access_number", "mrz_lines"]
     )]
     date_of_expiry: Option<String>,
 
@@ -44,12 +45,24 @@ struct CliArgs {
     #[arg(
         short = 'n',
         long = "num",
-        required_unless_present = "card_access_number"
+        required_unless_present_any = ["card_access_number", "mrz_lines"]
     )]
     document_number: Option<String>,
 
+    /// The machine readable zone, which supplies DoB, DoE and Doc Number by itself.
+    ///
+    /// Pass one line per flag, or one flag holding every line, so pasting works.
+    #[arg(
+        short = 'm',
+        long = "mrz",
+        value_name = "LINE",
+        action = clap::ArgAction::Append,
+        conflicts_with_all = ["document_number", "date_of_birth", "date_of_expiry", "card_access_number"]
+    )]
+    mrz_lines: Vec<String>,
+
     /// Card Access Number (PACE-only, mutually exclusive with DoB, DoE and Doc Number)
-    #[arg(short = 'c', long = "can", required_unless_present_any=["date_of_birth", "date_of_expiry", "document_number"])]
+    #[arg(short = 'c', long = "can", required_unless_present_any=["date_of_birth", "date_of_expiry", "document_number", "mrz_lines"])]
     card_access_number: Option<String>,
 
     /// Log level (trace/debug/info/warn/error)
@@ -60,17 +73,36 @@ struct CliArgs {
 impl CliArgs {
     /// Turn the flags into the one thing that unlocks the document.
     ///
-    /// clap has already enforced that either a CAN or all three MRZ fields are
-    /// present, which is what makes the unwraps here safe.
-    fn access_key(&self) -> AccessKey {
-        return match &self.card_access_number {
-            Some(card_access_number) => AccessKey::Can(card_access_number.clone()),
-            None => AccessKey::Mrz {
-                document_number: self.document_number.clone().unwrap(),
-                date_of_birth: self.date_of_birth.clone().unwrap(),
-                date_of_expiry: self.date_of_expiry.clone().unwrap(),
-            },
-        };
+    /// clap has already enforced that exactly one of a CAN, an MRZ, or all three of the
+    /// fields an MRZ would have supplied is present, which is what makes the unwraps here
+    /// safe. Only the MRZ can still fail, by not being one.
+    fn access_key(&self) -> Option<AccessKey> {
+        if let Some(card_access_number) = &self.card_access_number {
+            return Some(AccessKey::Can(card_access_number.clone()));
+        }
+
+        if !self.mrz_lines.is_empty() {
+            // Splitting on newlines lets one flag carry a pasted MRZ, and costs nothing
+            // when each line arrived in its own flag.
+            let lines: Vec<String> = self
+                .mrz_lines
+                .iter()
+                .flat_map(|value| value.lines())
+                .map(|line| line.to_string())
+                .collect();
+            let mrz = MRZ::from_recognized_lines(&lines)?;
+            return Some(AccessKey::Mrz {
+                document_number: mrz.document_number().clone(),
+                date_of_birth: mrz.date_of_birth().clone(),
+                date_of_expiry: mrz.date_of_expiry().clone(),
+            });
+        }
+
+        return Some(AccessKey::Mrz {
+            document_number: self.document_number.clone().unwrap(),
+            date_of_birth: self.date_of_birth.clone().unwrap(),
+            date_of_expiry: self.date_of_expiry.clone().unwrap(),
+        });
     }
 }
 
@@ -138,7 +170,18 @@ fn main() {
         std::process::exit(1);
     }
 
-    let access_key = args.access_key();
+    let access_key = match args.access_key() {
+        Some(access_key) => access_key,
+        None => {
+            error!("<red>--mrz was not a machine readable zone.</>");
+            error!(
+                "Expected three lines of 30 characters, or two of 44, holding only A-Z, 0-9 \
+                 and <. Every check digit has to pass, so one wrong character is enough to \
+                 reject the whole thing."
+            );
+            std::process::exit(1);
+        }
+    };
     let options = ReadOptions {
         file_prefix: session::file_prefix_for(&access_key),
         access_key,

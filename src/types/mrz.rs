@@ -28,6 +28,59 @@ pub enum MRZ {
     TD3(TD3Mrz),
 }
 
+/// The shapes ICAO 9303 gives a machine readable zone, as (lines, characters per line).
+///
+/// TD1 is three lines of thirty (Doc 9303-5), TD2 two of thirty six (Doc 9303-6) and TD3
+/// two of forty four (Doc 9303-4). Visas reuse two of these rather than adding their own:
+/// MRV-A is 2x44 like TD3, MRV-B is 2x36 like TD2. So a shape narrows the candidates and
+/// never settles the format on its own, which is what parsing and the check digits are for.
+const MRZ_LAYOUTS: [(usize, usize); 3] = [(3, 30), (2, 36), (2, 44)];
+
+/// Characters a recogniser reaches for when it meets a filler, and that an MRZ can never
+/// hold, so rewriting them costs nothing.
+///
+/// Anything absent from this list is left alone. `K` and `S` are also common misreads of
+/// `<`, but they are legal MRZ characters, and rewriting those would turn a bad frame into
+/// a wrong answer instead of a rejected one.
+const FILLER_LOOKALIKES: [(char, &str); 5] = [
+    ('\u{00AB}', "<<"),
+    ('\u{2039}', "<"),
+    ('\u{FF1C}', "<"),
+    ('\u{2329}', "<"),
+    ('\u{27E8}', "<"),
+];
+
+/// Turns one line of recognised text into what an MRZ line would look like.
+fn normalize_recognized_line(line: &String) -> String {
+    let mut normalized = String::with_capacity(line.len());
+    for character in line.chars() {
+        // An MRZ holds no spaces, and a recogniser inserting them is the usual reason a
+        // line comes back the wrong length.
+        if character.is_whitespace() {
+            continue;
+        }
+        match FILLER_LOOKALIKES
+            .iter()
+            .find(|(lookalike, _)| *lookalike == character)
+        {
+            Some((_, filler)) => normalized.push_str(filler),
+            None => {
+                for uppercased in character.to_uppercase() {
+                    normalized.push(uppercased);
+                }
+            }
+        }
+    }
+    return normalized;
+}
+
+/// Whether every character is one an MRZ is allowed to carry.
+fn is_mrz_alphabet(line: &String) -> bool {
+    return line.chars().all(|character| {
+        character.is_ascii_uppercase() || character.is_ascii_digit() || character == '<'
+    });
+}
+
 impl MRZ {
     pub fn deserialize(input: &String) -> Option<MRZ> {
         match input.len() {
@@ -35,6 +88,106 @@ impl MRZ {
             88 => Some(MRZ::TD3(TD3Mrz::deserialize(input)?)),
             _ => None,
         }
+    }
+
+    /// Picks an MRZ out of lines of text recognised in an image.
+    ///
+    /// Everything the recogniser saw goes in, in reading order. What comes back is an MRZ
+    /// only once some run of lines took one of the shapes in [`MRZ_LAYOUTS`], parsed, and
+    /// passed every check digit.
+    ///
+    /// Nothing else about the input is trusted. Lines are normalised, then dropped unless
+    /// they hold only MRZ characters *and* are as long as some layout expects. Dropping on
+    /// length is what lets a stray line sitting between the rows — a "SPECIMEN" overprint,
+    /// a scrap of the visual inspection zone — fall out and leave the real rows adjacent,
+    /// so a window can slide over what remains.
+    ///
+    /// Every check digit has to pass. A document whose issuer got one wrong will not be
+    /// found here and has to be typed in by hand, which is the right trade against a live
+    /// camera: there is always another frame, and a wrong answer taken quietly is worse
+    /// than no answer at all.
+    pub fn from_recognized_lines(lines: &[String]) -> Option<MRZ> {
+        let candidates: Vec<String> = lines
+            .iter()
+            .map(normalize_recognized_line)
+            .filter(is_mrz_alphabet)
+            // Only ASCII survives the filter above, so bytes and characters agree here.
+            .filter(|line| {
+                MRZ_LAYOUTS
+                    .iter()
+                    .any(|(_, line_length)| *line_length == line.len())
+            })
+            .collect();
+
+        for (line_count, line_length) in MRZ_LAYOUTS {
+            if candidates.len() < line_count {
+                continue;
+            }
+            for window in candidates.windows(line_count) {
+                if window.iter().any(|line| line.len() != line_length) {
+                    continue;
+                }
+                let mrz = match MRZ::deserialize(&window.concat()) {
+                    Some(mrz) => mrz,
+                    // TD2 has no parser yet, so a 2x36 gets this far and then stops.
+                    None => continue,
+                };
+                if mrz.validate_check_digits(false).iter().all(|valid| *valid) {
+                    return Some(mrz);
+                }
+            }
+        }
+        return None;
+    }
+
+    /// The two characters naming what kind of document this is.
+    ///
+    /// Not padding-stripped, so a passport reads `P<` rather than `P`.
+    pub fn document_code(&self) -> &String {
+        return match self {
+            Self::TD1(mrz) => &mrz.document_code,
+            Self::TD3(mrz) => &mrz.document_code,
+        };
+    }
+
+    /// The three character code of the state that issued the document, filler removed.
+    ///
+    /// With [`MRZ::document_code`] this identifies a document before anything has been
+    /// read off its chip, which is the point of scanning an MRZ first: a German residence
+    /// permit is code `AR` issued by `D`, printed `ARD<<`.
+    pub fn issuing_state(&self) -> &String {
+        return match self {
+            Self::TD1(mrz) => &mrz.issuing_state,
+            Self::TD3(mrz) => &mrz.issuing_state,
+        };
+    }
+
+    /// The document number as printed, with the MRZ's filler removed.
+    ///
+    /// Safe to hand straight to an access key: [`icao9303::pad_document_number`] puts the
+    /// filler back when keys are derived, so this is the same form the CLI's flags and the
+    /// app's form already carry.
+    pub fn document_number(&self) -> &String {
+        return match self {
+            Self::TD1(mrz) => &mrz.document_number,
+            Self::TD3(mrz) => &mrz.document_number,
+        };
+    }
+
+    /// Date of birth, YYMMDD.
+    pub fn date_of_birth(&self) -> &String {
+        return match self {
+            Self::TD1(mrz) => &mrz.date_of_birth,
+            Self::TD3(mrz) => &mrz.date_of_birth,
+        };
+    }
+
+    /// Date of expiry, YYMMDD.
+    pub fn date_of_expiry(&self) -> &String {
+        return match self {
+            Self::TD1(mrz) => &mrz.date_of_expiry,
+            Self::TD3(mrz) => &mrz.date_of_expiry,
+        };
     }
 
     // allowing dead code here because I think this is a useful API as a library
@@ -426,5 +579,95 @@ mod tests {
         assert_eq!(result.document_number, "123456789ABCDABCDABCDAB");
         assert_eq!(result.document_number_check_digit, '6');
         assert_eq!(result.optional_data_elements_line_1, "");
+    }
+
+    /// The TD3 specimen from ICAO 9303 p4. Every check digit on it is correct.
+    const TD3_LINE_1: &str = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+    const TD3_LINE_2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+
+    /// The TD1 specimen, as its three printed rows.
+    const TD1_LINE_1: &str = "I<UTO1234567897ABCDEFGH<<<<<<<";
+    const TD1_LINE_2: &str = "0001029<3001020UTO<<<<<<<<<<<8";
+    const TD1_LINE_3: &str = "MUSTERMANN<<ERIKA<<<<<<<<<<<<<";
+
+    fn lines(input: &[&str]) -> Vec<String> {
+        return input.iter().map(|line| line.to_string()).collect();
+    }
+
+    /// A recogniser hands over everything it saw, most of which is the visual inspection
+    /// zone rather than the MRZ.
+    #[test]
+    fn finds_a_td3_among_the_rest_of_the_page() {
+        let result = MRZ::from_recognized_lines(&lines(&[
+            "PASSPORT",
+            "UTOPIA",
+            "ERIKSSON",
+            "ANNA MARIA",
+            TD3_LINE_1,
+            TD3_LINE_2,
+        ]))
+        .unwrap();
+        match result {
+            MRZ::TD3(mrz) => assert_eq!(mrz.document_number, "L898902C3"),
+            other => panic!("expected a TD3, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn finds_a_td1_across_its_three_rows() {
+        let result =
+            MRZ::from_recognized_lines(&lines(&[TD1_LINE_1, TD1_LINE_2, TD1_LINE_3])).unwrap();
+        match result {
+            MRZ::TD1(mrz) => assert_eq!(mrz.document_number, "123456789"),
+            other => panic!("expected a TD1, got {:?}", other),
+        }
+    }
+
+    /// A line landing between the rows must not separate them. Dropping candidates on
+    /// length is what closes the gap back up.
+    #[test]
+    fn a_stray_line_between_the_rows_does_not_hide_them() {
+        let result =
+            MRZ::from_recognized_lines(&lines(&[TD3_LINE_1, "SPECIMEN", TD3_LINE_2])).unwrap();
+        assert!(matches!(result, MRZ::TD3(_)));
+    }
+
+    /// Lowercase, inserted spaces and a guillemet where two fillers belong are all things
+    /// a recogniser does to an MRZ, and none of them should cost a read.
+    #[test]
+    fn normalises_case_spacing_and_filler_lookalikes() {
+        let noisy_line_1 = "p<utoeriksson\u{00AB}anna<maria <<<<<<<<<<<<<<<<<<<";
+        let result = MRZ::from_recognized_lines(&lines(&[noisy_line_1, TD3_LINE_2])).unwrap();
+        match result {
+            MRZ::TD3(mrz) => assert_eq!(mrz.name_of_holder, "ERIKSSON<<ANNA<MARIA"),
+            other => panic!("expected a TD3, got {:?}", other),
+        }
+    }
+
+    /// Two rows of thirty is not a layout any document uses, however MRZ-shaped the
+    /// characters are.
+    #[test]
+    fn rejects_a_shape_no_document_has() {
+        assert!(MRZ::from_recognized_lines(&lines(&[TD1_LINE_1, TD1_LINE_2])).is_none());
+    }
+
+    /// One wrong character in the document number, which the shape cannot notice and the
+    /// check digits must.
+    #[test]
+    fn rejects_a_misread_that_breaks_a_check_digit() {
+        let misread = "L898902C46UTO7408122F1204159ZE184226B<<<<<10";
+        assert_eq!(misread.len(), TD3_LINE_2.len());
+        assert!(MRZ::from_recognized_lines(&lines(&[TD3_LINE_1, misread])).is_none());
+    }
+
+    /// Documents the gap rather than the behaviour: the shape is recognised and the parser
+    /// is what is missing, so this starts passing the day TD2Mrz lands.
+    #[test]
+    fn a_td2_shape_is_seen_but_cannot_be_parsed_yet() {
+        let line_1 = "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<";
+        let line_2 = "D231458907UTO7408122F1204159<<<<<<<6";
+        assert_eq!(line_1.len(), 36);
+        assert_eq!(line_2.len(), 36);
+        assert!(MRZ::from_recognized_lines(&lines(&[line_1, line_2])).is_none());
     }
 }

@@ -13,10 +13,11 @@ use jni::objects::{JByteArray, JClass, JObject, JString, JValue};
 use jni::sys::{jintArray, jstring};
 use jni::JNIEnv;
 use log::LevelFilter;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::session::{self, AccessKey, ReadOptions};
 use crate::smartcard_abstractions::CallbackSmartcard;
+use crate::types::MRZ;
 
 mod logger;
 mod report;
@@ -208,6 +209,77 @@ pub extern "system" fn Java_zone_ave_passauf_PassaufNative_nativeDecodeJpeg2000<
         return JObject::null().into_raw();
     }
     return array.into_raw();
+}
+
+/// What a parsed MRZ tells the app.
+///
+/// The document code and the issuing state are here alongside the three fields that
+/// unlock a chip, because together they settle what a document *is* before anything has
+/// been read off it. That is the whole reason to scan an MRZ ahead of a read rather than
+/// recover the same fields from DG1 afterwards.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ScannedMrz {
+    document_code: String,
+    issuing_state: String,
+    document_number: String,
+    date_of_birth: String,
+    date_of_expiry: String,
+}
+
+/// Parse a machine readable zone out of text recognised in an image.
+///
+/// The app hands over everything its recogniser saw, one MRZ line per line of `text`,
+/// and gets back the document's identity and access fields — or null, when none of those
+/// lines were an MRZ, which for a camera pointed at a document is the ordinary case and
+/// not an error. Like the decoder above, this touches no card: it is the app asking for
+/// help with text it already holds.
+///
+/// The parsing is [`crate::types::MRZ::from_recognized_lines`], which the CLI's `--mrz`
+/// calls just the same. Nothing about how an MRZ is read lives here.
+#[no_mangle]
+pub extern "system" fn Java_zone_ave_passauf_PassaufNative_nativeParseMrz<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    text: JString<'local>,
+) -> jstring {
+    logger::install();
+
+    let text: String = match env.get_string(&text) {
+        Ok(text) => text.into(),
+        Err(error) => {
+            log::error!("Could not read the text to parse: {}", error);
+            return JObject::null().into_raw();
+        }
+    };
+
+    let lines: Vec<String> = text.lines().map(|line| line.to_string()).collect();
+    let mrz = match MRZ::from_recognized_lines(&lines) {
+        Some(mrz) => mrz,
+        None => return JObject::null().into_raw(),
+    };
+
+    let json = match serde_json::to_string(&ScannedMrz {
+        document_code: mrz.document_code().clone(),
+        issuing_state: mrz.issuing_state().clone(),
+        document_number: mrz.document_number().clone(),
+        date_of_birth: mrz.date_of_birth().clone(),
+        date_of_expiry: mrz.date_of_expiry().clone(),
+    }) {
+        Ok(json) => json,
+        Err(error) => {
+            log::error!("Could not serialize the parsed MRZ: {}", error);
+            return JObject::null().into_raw();
+        }
+    };
+
+    return match env.new_string(json) {
+        Ok(text) => text.into_raw(),
+        Err(error) => {
+            log::error!("Could not return the parsed MRZ: {}", error);
+            JObject::null().into_raw()
+        }
+    };
 }
 
 /// Everything that happens between the two JNI conversions.

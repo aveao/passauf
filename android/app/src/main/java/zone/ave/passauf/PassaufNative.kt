@@ -68,6 +68,48 @@ object PassaufNative {
 
     private external fun nativeDecodeJpeg2000(data: ByteArray): IntArray?
 
+    private external fun nativeParseMrz(text: String): String?
+
+    /**
+     * What a machine readable zone says, once one has been found.
+     *
+     * [documentCode] and [issuingState] name the document itself, which is how a
+     * scan can tell what is about to be read before its chip has been touched. The
+     * other three are what unlock it.
+     */
+    @Serializable
+    data class ScannedMrz(
+        val documentCode: String,
+        val issuingState: String,
+        val documentNumber: String,
+        val dateOfBirth: String,
+        val dateOfExpiry: String,
+    )
+
+    /**
+     * Find a machine readable zone in text recognised from an image.
+     *
+     * Hand over every line the recogniser produced, in reading order, and the
+     * library sorts out which of them are the MRZ: lines are normalised, kept only
+     * if they hold MRZ characters and are as long as some layout expects, and then
+     * parsed and checked. A result comes back only once every check digit passes,
+     * so a returned value can be trusted and a null is not worth reporting — point
+     * the camera at the next frame instead.
+     *
+     * Cheap enough to call per frame, and touches no card.
+     *
+     * @return the fields, or null if those lines held no MRZ.
+     */
+    fun parseMrz(lines: List<String>): ScannedMrz? {
+        val json = nativeParseMrz(lines.joinToString("\n")) ?: return null
+        return try {
+            passaufJson.decodeFromString<ScannedMrz>(json)
+        } catch (error: Exception) {
+            Log.e(TAG, "Could not read the parsed MRZ: $json", error)
+            null
+        }
+    }
+
     /**
      * Decode a JPEG 2000 image, which Android cannot do on its own.
      *
