@@ -1,0 +1,25 @@
+# Its own package rather than a target of the passauf crate: this is a side project
+# that happens to live in the repository, it is never built as part of the app or the
+# CLI, and nothing shipped depends on it.
+#
+# The empty [workspace] below is what keeps it that way. Without it cargo would try to
+# attach this package to whatever workspace it finds up the tree.
+[package]
+name = "tesseract-ocrb-passauf"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Training an OCR-B model for reading machine readable zones."
+
+[[bin]]
+name = "generate-mrz-corpus"
+path = "src/generate_mrz_corpus.rs"
+
+[dependencies]
+# Only for the check digits and the parser, so the corpus can be verified against the
+# same code that will read it back. None of the reader backends are wanted here, and
+# pcsc in particular would drag in a system library for no reason.
+passauf = { path = "..", default-features = false }
+rand = "0.10"
+
+[workspace]

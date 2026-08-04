@@ -6,3 +6,7 @@
 /standards
 # Local planning notes.
 /PRE-RELEASE-PLAN.md
+# Corpora, renders, checkpoints and models. All reproducible from train-ocrb.sh, and
+# large enough that committing them would dwarf the source.
+/tesseract-ocrb-passauf/build
+/tesseract-ocrb-passauf/target
