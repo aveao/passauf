@@ -1,3 +1,5 @@
+import com.android.build.api.artifact.SingleArtifact
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -73,7 +75,17 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.kotlinx.serialization.json)
+
+    // Reading the MRZ off a document with the camera, so the three fields do not
+    // have to be typed. Both run entirely on device; see AndroidManifest.xml for
+    // why that is a guarantee rather than a promise.
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    implementation(libs.mlkit.text.recognition)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
@@ -118,4 +130,63 @@ val buildRust by tasks.registering(Exec::class) {
 
 tasks.named("preBuild") {
     dependsOn(buildRust)
+}
+
+/**
+ * Permissions this app must never ship, whoever asks for them.
+ *
+ * Everything passauf claims about privacy rests on there being no way off the
+ * device, and that is not something the app source can settle on its own: ML Kit
+ * pulls in com.google.android.datatransport, which declares INTERNET and
+ * ACCESS_NETWORK_STATE, and the manifest merger folds them in silently. They are
+ * stripped in AndroidManifest.xml with tools:node="remove".
+ *
+ * A dependency bump could undo that without a word, so the build checks rather
+ * than trusts.
+ */
+val forbiddenPermissions = listOf(
+    "android.permission.INTERNET",
+    "android.permission.ACCESS_NETWORK_STATE",
+)
+
+androidComponents {
+    onVariants { variant ->
+        val variantName = variant.name.replaceFirstChar { it.uppercase() }
+        val mergedManifest = variant.artifacts.get(SingleArtifact.MERGED_MANIFEST)
+
+        val verify = tasks.register("verify${variantName}CannotReachTheNetwork") {
+            group = "verification"
+            description = "Fails if anything merged a network permission into the manifest."
+
+            inputs.file(mergedManifest)
+            doLast {
+                val manifest = mergedManifest.get().asFile.readText()
+                val found = forbiddenPermissions.filter { manifest.contains(it) }
+                if (found.isNotEmpty()) {
+                    throw GradleException(
+                        buildString {
+                            appendLine("A network permission reached the merged manifest:")
+                            found.forEach { appendLine("  $it") }
+                            appendLine()
+                            appendLine(
+                                "passauf reads passports and says it cannot send them anywhere. " +
+                                    "That has to stay true. Find who asked in"
+                            )
+                            appendLine("  app/build/outputs/logs/manifest-merger-*-report.txt")
+                            append(
+                                "and strip it in AndroidManifest.xml with tools:node=\"remove\", " +
+                                    "or drop the dependency."
+                            )
+                        }
+                    )
+                }
+            }
+        }
+
+        // onVariants runs before AGP has created the assemble tasks, so this waits for
+        // the one it wants to show up rather than asking for it by name now.
+        tasks.matching { it.name == "assemble$variantName" }.configureEach {
+            dependsOn(verify)
+        }
+    }
 }

@@ -10,9 +10,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -48,11 +51,11 @@ import java.time.format.DateTimeFormatter
 private val MRZ_DATE = DateTimeFormatter.ofPattern("yyMMdd").withZone(ZoneOffset.UTC)
 
 /**
- * Where the user types in what the document has printed on it.
+ * Where the user says what the document has printed on it.
  *
- * There is no scanner yet, so this is the only way in. The MRZ fields are the
- * same three BAC has always wanted; a CAN is quicker to type but only works on
- * a document that offers PACE.
+ * The MRZ fields are the same three BAC has always wanted, and the camera can fill
+ * them in rather than have them typed. A CAN is quicker to type but only works on a
+ * document that offers PACE.
  */
 @Composable
 fun InputScreen(
@@ -61,6 +64,31 @@ fun InputScreen(
     onReady: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Local to this screen rather than a state in the ViewModel: scanning is a way of
+    // filling the form in, not a step of reading a document, and the back stack should
+    // treat it that way.
+    var scanning by remember { mutableStateOf(false) }
+
+    if (scanning) {
+        BackHandler { scanning = false }
+        ScanMrzScreen(
+            onFound = { scanned ->
+                onChange {
+                    it.copy(
+                        kind = KeyKind.MRZ,
+                        documentNumber = scanned.documentNumber,
+                        dateOfBirth = scanned.dateOfBirth,
+                        dateOfExpiry = scanned.dateOfExpiry,
+                    )
+                }
+                scanning = false
+            },
+            onCancel = { scanning = false },
+            modifier = modifier,
+        )
+        return
+    }
+
     Column(
         modifier = modifier
             .verticalScroll(rememberScrollState())
@@ -81,6 +109,17 @@ fun InputScreen(
                 ) {
                     Text(if (kind == KeyKind.MRZ) "Document number" else "CAN")
                 }
+            }
+        }
+
+        if (form.kind == KeyKind.MRZ) {
+            OutlinedButton(
+                onClick = { scanning = true },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Filled.PhotoCamera, contentDescription = null)
+                Spacer(Modifier.padding(horizontal = 4.dp))
+                Text("Scan the printed rows")
             }
         }
 

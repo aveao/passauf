@@ -11,6 +11,35 @@
         android:required="true"
         tools:ignore="UnnecessaryRequiredFeature" />
 
+    <!-- Reading the MRZ off the document instead of typing it. Optional in every
+         sense: the permission is only asked for when the scanner is opened, and
+         declining it costs nothing, because the fields can still be entered by
+         hand. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+
+    <!-- This app must never hold INTERNET, and saying so takes work rather than
+         silence. ML Kit brings in com.google.android.datatransport:transport-backend-cct,
+         Google's telemetry pipeline, which declares INTERNET and ACCESS_NETWORK_STATE
+         of its own accord, and the manifest merger would fold both into the APK
+         without a word.
+
+         Removing them here is what makes "nothing leaves the device" enforced rather
+         than promised: text recognition runs against a model bundled into the APK and
+         needs no network, and with the permissions gone anything that tries anyway is
+         refused by the system rather than trusted not to.
+
+         If either line ever disappears, check the merged manifest under
+         app/build/outputs/logs/manifest-merger-*-report.txt before assuming a
+         dependency stopped asking. -->
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
+    <uses-permission
+        android:name="android.permission.ACCESS_NETWORK_STATE"
+        tools:node="remove" />
+
+
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
