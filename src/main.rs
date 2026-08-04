@@ -90,7 +90,13 @@ impl CliArgs {
                 .flat_map(|value| value.lines())
                 .map(|line| line.to_string())
                 .collect();
-            let mrz = MRZ::from_recognized_lines(&lines)?;
+            let mrz = match MRZ::from_recognized_lines(&lines) {
+                Ok(mrz) => mrz,
+                Err(failure) => {
+                    error!("<red>{}</>", failure);
+                    return None;
+                }
+            };
             return Some(AccessKey::Mrz {
                 document_number: mrz.document_number().clone(),
                 date_of_birth: mrz.date_of_birth().clone(),
@@ -172,15 +178,8 @@ fn main() {
 
     let access_key = match args.access_key() {
         Some(access_key) => access_key,
-        None => {
-            error!("<red>--mrz was not a machine readable zone.</>");
-            error!(
-                "Expected three lines of 30 characters, or two of 44, holding only A-Z, 0-9 \
-                 and <. Every check digit has to pass, so one wrong character is enough to \
-                 reject the whole thing."
-            );
-            std::process::exit(1);
-        }
+        // access_key has already said what was wrong with it.
+        None => std::process::exit(1),
     };
     let options = ReadOptions {
         file_prefix: session::file_prefix_for(&access_key),

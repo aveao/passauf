@@ -87,26 +87,37 @@ object PassaufNative {
     )
 
     /**
+     * A frame's worth of recognised text, and what became of it.
+     *
+     * Exactly one of these is set. [problem] says how far the lines got before
+     * something refused them, which is the difference between a camera that cannot
+     * resolve the print and one that is a single character away.
+     */
+    @Serializable
+    data class MrzScanResult(
+        val mrz: ScannedMrz? = null,
+        val problem: String? = null,
+    )
+
+    /**
      * Find a machine readable zone in text recognised from an image.
      *
      * Hand over every line the recogniser produced, in reading order, and the
      * library sorts out which of them are the MRZ: lines are normalised, kept only
      * if they hold MRZ characters and are as long as some layout expects, and then
-     * parsed and checked. A result comes back only once every check digit passes,
-     * so a returned value can be trusted and a null is not worth reporting — point
-     * the camera at the next frame instead.
+     * parsed and checked. Fields come back only once every check digit passes, so
+     * what is returned can be trusted.
      *
      * Cheap enough to call per frame, and touches no card.
-     *
-     * @return the fields, or null if those lines held no MRZ.
      */
-    fun parseMrz(lines: List<String>): ScannedMrz? {
-        val json = nativeParseMrz(lines.joinToString("\n")) ?: return null
+    fun parseMrz(lines: List<String>): MrzScanResult {
+        val json = nativeParseMrz(lines.joinToString("\n"))
+            ?: return MrzScanResult(problem = "The passauf library returned nothing at all.")
         return try {
-            passaufJson.decodeFromString<ScannedMrz>(json)
+            passaufJson.decodeFromString<MrzScanResult>(json)
         } catch (error: Exception) {
             Log.e(TAG, "Could not read the parsed MRZ: $json", error)
-            null
+            MrzScanResult(problem = "Could not read what passauf returned.")
         }
     }
 

@@ -1,6 +1,7 @@
 use crate::{dg_parsers::helpers as dg_helpers, icao9303};
 use simplelog::warn;
 use std::cmp::min;
+use std::fmt;
 
 fn validate_mrz_field_check_digit(
     field: &String,
@@ -81,6 +82,81 @@ fn is_mrz_alphabet(line: &String) -> bool {
     });
 }
 
+/// Why recognised text did not turn into an MRZ.
+///
+/// A camera that will not scan a document is failing at one of these, and they want
+/// different things done about them, so the difference is worth carrying back out
+/// rather than flattening into "no".
+#[derive(Debug, Clone, PartialEq)]
+pub enum MrzScanFailure {
+    /// Nothing came back the length of an MRZ row. The print was never resolved.
+    NoCandidates,
+    /// Rows of usable lengths, but never enough of one length together.
+    NoLayout { lengths: Vec<usize> },
+    /// A layout's worth of rows that the parser would not take.
+    Unparsed { lines: usize, length: usize },
+    /// Rows that parsed, and check digits that disagreed with their fields.
+    CheckDigits {
+        lines: usize,
+        length: usize,
+        failed: Vec<&'static str>,
+    },
+}
+
+impl MrzScanFailure {
+    /// How far a run of lines got, so the most informative failure is the one reported.
+    ///
+    /// Reaching the check digits says far more than never finding a layout, and a frame
+    /// usually produces several of these at once.
+    fn rank(&self) -> u8 {
+        return match self {
+            Self::NoCandidates => 0,
+            Self::NoLayout { .. } => 1,
+            Self::Unparsed { .. } => 2,
+            Self::CheckDigits { .. } => 3,
+        };
+    }
+}
+
+impl fmt::Display for MrzScanFailure {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        return match self {
+            Self::NoCandidates => write!(f, "Nothing came back the length of an MRZ row."),
+            Self::NoLayout { lengths } => write!(
+                f,
+                "Rows of {} characters. A passport needs two of 44, an identity card three of 30.",
+                lengths
+                    .iter()
+                    .map(|length| length.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            // 2x36 is the one shape that reaches here on a correct read, because TD2
+            // has no parser yet. Saying so beats letting it look like a bad scan.
+            Self::Unparsed { lines, length } if *lines == 2 && *length == 36 => write!(
+                f,
+                "Read a TD2 machine readable zone, which passauf cannot parse yet."
+            ),
+            Self::Unparsed { lines, length } => {
+                write!(f, "{} rows of {} would not parse.", lines, length)
+            }
+            Self::CheckDigits {
+                lines,
+                length,
+                failed,
+            } => write!(
+                f,
+                "{}x{} read, but the {} check digit{} did not match. A character is being \
+                 misread; hold steadier or move closer.",
+                lines,
+                length,
+                failed.join(" and "),
+                if failed.len() == 1 { "" } else { "s" }
+            ),
+        };
+    }
+}
+
 impl MRZ {
     pub fn deserialize(input: &String) -> Option<MRZ> {
         match input.len() {
@@ -106,7 +182,10 @@ impl MRZ {
     /// found here and has to be typed in by hand, which is the right trade against a live
     /// camera: there is always another frame, and a wrong answer taken quietly is worse
     /// than no answer at all.
-    pub fn from_recognized_lines(lines: &[String]) -> Option<MRZ> {
+    ///
+    /// When nothing is found, the [`MrzScanFailure`] says how far the lines got, because
+    /// a camera that will not scan is a different problem depending on where it stopped.
+    pub fn from_recognized_lines(lines: &[String]) -> Result<MRZ, MrzScanFailure> {
         let candidates: Vec<String> = lines
             .iter()
             .map(normalize_recognized_line)
@@ -119,6 +198,20 @@ impl MRZ {
             })
             .collect();
 
+        if candidates.is_empty() {
+            return Err(MrzScanFailure::NoCandidates);
+        }
+
+        let mut furthest: Option<MrzScanFailure> = None;
+        let mut remember = |failure: MrzScanFailure| {
+            if furthest
+                .as_ref()
+                .map_or(true, |best| failure.rank() > best.rank())
+            {
+                furthest = Some(failure);
+            }
+        };
+
         for (line_count, line_length) in MRZ_LAYOUTS {
             if candidates.len() < line_count {
                 continue;
@@ -130,14 +223,55 @@ impl MRZ {
                 let mrz = match MRZ::deserialize(&window.concat()) {
                     Some(mrz) => mrz,
                     // TD2 has no parser yet, so a 2x36 gets this far and then stops.
-                    None => continue,
+                    None => {
+                        remember(MrzScanFailure::Unparsed {
+                            lines: line_count,
+                            length: line_length,
+                        });
+                        continue;
+                    }
                 };
-                if mrz.validate_check_digits(false).iter().all(|valid| *valid) {
-                    return Some(mrz);
+
+                let valid = mrz.validate_check_digits(false);
+                if valid.iter().all(|passed| *passed) {
+                    return Ok(mrz);
                 }
+                remember(MrzScanFailure::CheckDigits {
+                    lines: line_count,
+                    length: line_length,
+                    failed: mrz
+                        .check_digit_names()
+                        .iter()
+                        .zip(valid.iter())
+                        .filter(|(_, passed)| !**passed)
+                        .map(|(name, _)| *name)
+                        .collect(),
+                });
             }
         }
-        return None;
+
+        return Err(furthest.unwrap_or(MrzScanFailure::NoLayout {
+            lengths: candidates.iter().map(|line| line.len()).collect(),
+        }));
+    }
+
+    /// What each entry of [`MRZ::validate_check_digits`] is checking, in the same order.
+    pub fn check_digit_names(&self) -> &'static [&'static str] {
+        return match self {
+            Self::TD1(_) => &[
+                "document number",
+                "date of birth",
+                "date of expiry",
+                "composite",
+            ],
+            Self::TD3(_) => &[
+                "document number",
+                "date of birth",
+                "date of expiry",
+                "optional data",
+                "composite",
+            ],
+        };
     }
 
     /// The two characters naming what kind of document this is.
@@ -648,26 +782,67 @@ mod tests {
     /// characters are.
     #[test]
     fn rejects_a_shape_no_document_has() {
-        assert!(MRZ::from_recognized_lines(&lines(&[TD1_LINE_1, TD1_LINE_2])).is_none());
+        assert_eq!(
+            MRZ::from_recognized_lines(&lines(&[TD1_LINE_1, TD1_LINE_2])).unwrap_err(),
+            MrzScanFailure::NoLayout {
+                lengths: vec![30, 30]
+            }
+        );
     }
 
     /// One wrong character in the document number, which the shape cannot notice and the
-    /// check digits must.
+    /// check digits must. Naming the ones that failed is what tells a camera's user that
+    /// they are close rather than nowhere.
     #[test]
-    fn rejects_a_misread_that_breaks_a_check_digit() {
+    fn names_the_check_digits_a_misread_breaks() {
         let misread = "L898902C46UTO7408122F1204159ZE184226B<<<<<10";
         assert_eq!(misread.len(), TD3_LINE_2.len());
-        assert!(MRZ::from_recognized_lines(&lines(&[TD3_LINE_1, misread])).is_none());
+        assert_eq!(
+            MRZ::from_recognized_lines(&lines(&[TD3_LINE_1, misread])).unwrap_err(),
+            MrzScanFailure::CheckDigits {
+                lines: 2,
+                length: 44,
+                failed: vec!["document number", "composite"],
+            }
+        );
+    }
+
+    /// Nothing the right length at all is a different problem from something close.
+    #[test]
+    fn says_when_nothing_was_even_the_right_length() {
+        assert_eq!(
+            MRZ::from_recognized_lines(&lines(&["PASSPORT", "UTOPIA"])).unwrap_err(),
+            MrzScanFailure::NoCandidates
+        );
     }
 
     /// Documents the gap rather than the behaviour: the shape is recognised and the parser
-    /// is what is missing, so this starts passing the day TD2Mrz lands.
+    /// is what is missing, so this changes the day TD2Mrz lands.
     #[test]
     fn a_td2_shape_is_seen_but_cannot_be_parsed_yet() {
         let line_1 = "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<";
         let line_2 = "D231458907UTO7408122F1204159<<<<<<<6";
         assert_eq!(line_1.len(), 36);
         assert_eq!(line_2.len(), 36);
-        assert!(MRZ::from_recognized_lines(&lines(&[line_1, line_2])).is_none());
+        let failure = MRZ::from_recognized_lines(&lines(&[line_1, line_2])).unwrap_err();
+        assert_eq!(
+            failure,
+            MrzScanFailure::Unparsed {
+                lines: 2,
+                length: 36
+            }
+        );
+        assert!(failure.to_string().contains("TD2"));
+    }
+
+    /// The most informative failure is the one worth showing, and a frame usually
+    /// produces several at once.
+    #[test]
+    fn reports_the_furthest_a_run_of_lines_got() {
+        let misread = "L898902C46UTO7408122F1204159ZE184226B<<<<<10";
+        // A stray thirty-character row alongside a TD3 that only fails its check digits.
+        let failure =
+            MRZ::from_recognized_lines(&lines(&[TD1_LINE_1, TD3_LINE_1, misread])).unwrap_err();
+        assert!(matches!(failure, MrzScanFailure::CheckDigits { .. }));
     }
 }

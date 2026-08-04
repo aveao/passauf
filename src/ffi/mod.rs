@@ -227,6 +227,18 @@ struct ScannedMrz {
     date_of_expiry: String,
 }
 
+/// A frame's worth of recognised text, and what became of it.
+///
+/// A scan that will not land is worth explaining rather than leaving as silence, so
+/// exactly one of these is set: the fields, or how far the lines got before something
+/// refused them.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MrzScanResult {
+    mrz: Option<ScannedMrz>,
+    problem: Option<String>,
+}
+
 /// Parse a machine readable zone out of text recognised in an image.
 ///
 /// The app hands over everything its recogniser saw, one MRZ line per line of `text`,
@@ -254,18 +266,24 @@ pub extern "system" fn Java_zone_ave_passauf_PassaufNative_nativeParseMrz<'local
     };
 
     let lines: Vec<String> = text.lines().map(|line| line.to_string()).collect();
-    let mrz = match MRZ::from_recognized_lines(&lines) {
-        Some(mrz) => mrz,
-        None => return JObject::null().into_raw(),
+    let result = match MRZ::from_recognized_lines(&lines) {
+        Ok(mrz) => MrzScanResult {
+            mrz: Some(ScannedMrz {
+                document_code: mrz.document_code().clone(),
+                issuing_state: mrz.issuing_state().clone(),
+                document_number: mrz.document_number().clone(),
+                date_of_birth: mrz.date_of_birth().clone(),
+                date_of_expiry: mrz.date_of_expiry().clone(),
+            }),
+            problem: None,
+        },
+        Err(failure) => MrzScanResult {
+            mrz: None,
+            problem: Some(failure.to_string()),
+        },
     };
 
-    let json = match serde_json::to_string(&ScannedMrz {
-        document_code: mrz.document_code().clone(),
-        issuing_state: mrz.issuing_state().clone(),
-        document_number: mrz.document_number().clone(),
-        date_of_birth: mrz.date_of_birth().clone(),
-        date_of_expiry: mrz.date_of_expiry().clone(),
-    }) {
+    let json = match serde_json::to_string(&result) {
         Ok(json) => json,
         Err(error) => {
             log::error!("Could not serialize the parsed MRZ: {}", error);
