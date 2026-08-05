@@ -1,11 +1,12 @@
 [package]
 name = "passauf"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 # Set by hayro-jpeg2000, which is the only dependency that asks for anything
 # recent. Declared so a too-old toolchain says so rather than failing somewhere
 # inside a dependency.
 rust-version = "1.92"
+license = "MIT"
 
 [lib]
 name = "passauf"

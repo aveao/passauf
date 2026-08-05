@@ -740,7 +740,7 @@ checksum = "8fecab3723493c7851f292cb060f3ee1c42f19b8d749345d0d7eaf3fd19aa62d"
 
 [[package]]
 name = "passauf"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes",
  "asn1",

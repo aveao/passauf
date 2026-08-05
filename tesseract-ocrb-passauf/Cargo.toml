@@ -10,6 +10,7 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 description = "Training an OCR-B model for reading machine readable zones."
+license = "MIT"
 
 [[bin]]
 name = "generate-mrz-corpus"

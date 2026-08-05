@@ -8,12 +8,28 @@ It is also a library, and there is an Android app built on it under [`android/`]
 
 In late 2020, I wrote an eMRTD implementation for the [Iceman firmware of Proxmark 3](https://github.com/RfidResearchGroup/proxmark3), supporting only BAC. I have been meaning to support PACE since then, but as PACE requires implementing a lot of additional crypto, I didn't really feel like doing it in C anymore². This is me fulfilling that dream, and hopefully making something that looks nicer in the process.
 
+I did most of the main implementation myself, got re-employed (early 2025), then didn't find time to continue. In mid-2026 I came back to it, threw some LLMs at the task of PACE support, many fixes, EF.SOD validation, and the android app. Not quite done with cleaning up after that (incl. this very README) but the current state here is very workable. The original pre-LLM state exists in the `main` branch still.
+
 ¹: See Terminology section in infodump.md.
 ²: The codebase was starting to look ugly, the memory management was annoying as always. I also was vary of pulling in libraries for handling BER-TLV or ASN.1, which only made writing code for it more complicated.
 
-## Basic Usage
+## Android App
 
-No binaries are provided at this time, so you're on your own for compiling the project.
+There's a signed, developer-verified android app you can install, which should be relatively fully featured other than certificate chain validation (which I may eventually add). It intentionally doesn't have internet permissions.
+
+The app is not to be used for validation (it lacks enough validation capabilities), and is moreso meant as a demo of passauf, and as a tool for fellow nerds who like to know what's under every rock. You should read the legality of reading your documents before utilizing it, and should be especially careful if you're planning to use it with anyone else's documents.
+
+You can find latest published apk in the [releases tab of github](https://github.com/aveao/passauf/releases).
+
+You're recommended to utilize [Obtainium](https://obtainium.imranr.dev/) for auto-updates, I'll edit in the Obtainium add link here later, but you can just go to Obtainium, hit add, paste in this repo's URL, and that should work too :)
+
+For the MRZ OCR half, we have a custom-trained tesseract on only synthetically generated MRZ data with OCR-B, which is surprisingly reliable with real life conditions. You can read more about it [here](tesseract-ocrb-passauf/README.md). MLKit and stock Tesseract produced poor results.
+
+**Do not send me debug logs, they contain detailed PII and I will be very unhappy.**
+
+## Basic CLI Usage
+
+No binaries are provided at this time for the CLI, so you're on your own for compiling the project.
 
 Generally, `--help` exists for using the tool.
 
