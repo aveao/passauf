@@ -9,6 +9,7 @@ import android.util.Log
 import android.util.Size
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
@@ -34,6 +35,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.FlashlightOff
+import androidx.compose.material.icons.filled.FlashlightOn
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -71,6 +74,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import zone.ave.passauf.MrzRecognizer
 import zone.ave.passauf.PassaufNative
 import java.util.concurrent.Executors
+import kotlin.math.exp
 import kotlin.math.roundToInt
 
 /**
@@ -220,6 +224,11 @@ fun ScanMrzScreen(
     var showDiagnostics by remember { mutableStateOf(false) }
     var diagnostics by remember { mutableStateOf<ScanDiagnostics?>(null) }
 
+    // A document under glass or laminate is often easiest to read with the light on, and
+    // hardest with it on at the wrong angle, so this is the user's call rather than ours.
+    var camera by remember { mutableStateOf<Camera?>(null) }
+    var torch by remember { mutableStateOf(false) }
+
     // The guide has to sit over the frame the recogniser is given, not over the screen,
     // or the box on screen would be pointing somewhere the crop is not looking. Holding
     // the preview to the frame's own proportions is what keeps the two honest.
@@ -240,9 +249,26 @@ fun ScanMrzScreen(
                 shape = { currentShape },
                 onFound = { scanned -> if (found == null) found = scanned },
                 onDiagnostics = { latest -> diagnostics = latest },
+                onCamera = { bound -> camera = bound },
                 modifier = Modifier.fillMaxSize(),
             )
             GuideOverlay(shape = shape, modifier = Modifier.fillMaxSize())
+        }
+
+        if (camera?.cameraInfo?.hasFlashUnit() == true) {
+            IconButton(
+                onClick = {
+                    torch = !torch
+                    camera?.cameraControl?.enableTorch(torch)
+                },
+                modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+            ) {
+                Icon(
+                    if (torch) Icons.Filled.FlashlightOn else Icons.Filled.FlashlightOff,
+                    contentDescription = if (torch) "Turn the light off" else "Turn the light on",
+                    tint = if (torch) Color.White else Color.White.copy(alpha = 0.5f),
+                )
+            }
         }
 
         IconButton(
@@ -263,7 +289,10 @@ fun ScanMrzScreen(
         if (showDiagnostics) {
             DiagnosticsOverlay(
                 diagnostics = diagnostics,
-                modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+                // Clear of the row of buttons above it rather than underneath them.
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = 8.dp, end = 8.dp, top = 56.dp),
             )
         }
 
@@ -415,6 +444,7 @@ private fun Viewfinder(
     shape: () -> DocumentShape,
     onFound: (PassaufNative.ScannedMrz) -> Unit,
     onDiagnostics: (ScanDiagnostics) -> Unit,
+    onCamera: (Camera?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -433,6 +463,7 @@ private fun Viewfinder(
     val provider = remember { mutableStateOf<ProcessCameraProvider?>(null) }
     val currentOnFound by rememberUpdatedState(onFound)
     val currentOnDiagnostics by rememberUpdatedState(onDiagnostics)
+    val currentOnCamera by rememberUpdatedState(onCamera)
 
     DisposableEffect(lifecycleOwner) {
         // The provider arrives whenever it arrives, which can be after this screen has
@@ -479,16 +510,20 @@ private fun Viewfinder(
             )
 
             cameraProvider.unbindAll()
-            cameraProvider.bindToLifecycle(
-                lifecycleOwner,
-                CameraSelector.DEFAULT_BACK_CAMERA,
-                preview,
-                analysis,
+            currentOnCamera(
+                cameraProvider.bindToLifecycle(
+                    lifecycleOwner,
+                    CameraSelector.DEFAULT_BACK_CAMERA,
+                    preview,
+                    analysis,
+                )
             )
         }, ContextCompat.getMainExecutor(context))
 
         onDispose {
             gone = true
+            currentOnCamera(null)
+            // Unbinding puts the light out with it, so there is nothing else to undo.
             provider.value?.unbindAll()
             // Released on the thread that opened it, then the thread is retired.
             executor.execute { recognizer.value?.close() }
@@ -542,6 +577,88 @@ private fun GuideOverlay(shape: DocumentShape, modifier: Modifier = Modifier) {
  * Deciding which rows are the machine readable zone belongs to the library, where the
  * CLI benefits from it too, and where it can be tested without a camera.
  */
+/**
+ * How hard the tone curve pushes light and dark apart. Tuned, not guessed.
+ *
+ * Measured against a rendered row shaded across its width, blurred and noised to stand
+ * in for a photograph: untouched it lost its first five characters, and so did a plain
+ * contrast stretch. At 8 the row read perfectly. At 12 the curve began eating the
+ * difference between B and 8, which is the pair that matters most here.
+ */
+private const val CONTRAST_STRENGTH = 8.0
+
+/** Share of pixels ignored at each end when deciding what counts as black and white. */
+private const val CONTRAST_CLIP = 0.02
+
+/**
+ * Pushes the paper towards white and the print towards black.
+ *
+ * Two reasons this earns its keep. A photograph of a document is lit unevenly — one end
+ * of the zone in shadow, the other catching the light — and it is always the shaded end
+ * whose characters come back wrong. And the model has only ever seen pure black on pure
+ * white, because text2image renders bilevel; a flat grey frame is a kind of picture it
+ * was never shown.
+ *
+ * The ends are found by percentile rather than by the darkest and lightest pixels
+ * present, so one speck of dust or one specular highlight cannot decide the range for
+ * the whole strip.
+ */
+private fun sharpen(crop: Bitmap): Bitmap {
+    val width = crop.width
+    val height = crop.height
+    val pixels = IntArray(width * height)
+    crop.getPixels(pixels, 0, width, 0, 0, width, height)
+
+    val histogram = IntArray(256)
+    val grey = ByteArray(pixels.size)
+    for (index in pixels.indices) {
+        val pixel = pixels[index]
+        // Integer luminance, the usual 0.299/0.587/0.114 scaled by 256.
+        val value = (
+            (pixel shr 16 and 0xFF) * 77 +
+                (pixel shr 8 and 0xFF) * 151 +
+                (pixel and 0xFF) * 28
+            ) shr 8
+        grey[index] = value.toByte()
+        histogram[value]++
+    }
+
+    val clip = (pixels.size * CONTRAST_CLIP).toInt()
+    var low = 0
+    var counted = 0
+    while (low < 255 && counted + histogram[low] < clip) {
+        counted += histogram[low]
+        low++
+    }
+    var high = 255
+    counted = 0
+    while (high > low + 1 && counted + histogram[high] < clip) {
+        counted += histogram[high]
+        high--
+    }
+
+    // One value per input level, so the arithmetic happens 256 times rather than once
+    // per pixel.
+    val span = (high - low).coerceAtLeast(1).toDouble()
+    fun sigmoid(level: Double) = 1.0 / (1.0 + exp(CONTRAST_STRENGTH * (0.5 - level)))
+    val floor = sigmoid(0.0)
+    val ceiling = sigmoid(1.0)
+    val curve = IntArray(256) { level ->
+        val stretched = ((level - low) / span).coerceIn(0.0, 1.0)
+        (((sigmoid(stretched) - floor) / (ceiling - floor)) * 255.0)
+            .roundToInt().coerceIn(0, 255)
+    }
+
+    for (index in pixels.indices) {
+        val value = curve[grey[index].toInt() and 0xFF]
+        pixels[index] = (0xFF shl 24) or (value shl 16) or (value shl 8) or value
+    }
+
+    val sharpened = createBitmap(width, height)
+    sharpened.setPixels(pixels, 0, width, 0, 0, width, height)
+    return sharpened
+}
+
 /**
  * Sets the crop in a margin of blank paper, which is where print normally sits.
  *
@@ -632,14 +749,17 @@ private class MrzAnalyzer(
                 return
             }
 
-            val padded = quiet(cropped)
+            // Contrast first, then the border: a white margin added beforehand would sit
+            // in the histogram and drag the idea of what counts as paper towards itself.
+            val sharpened = sharpen(cropped)
+            cropped.recycle()
+            val padded = quiet(sharpened)
+            sharpened.recycle()
+
             val lines = try {
                 engine.recognize(padded)
             } finally {
-                if (padded !== cropped) {
-                    padded.recycle()
-                }
-                cropped.recycle()
+                padded.recycle()
             }
             val result = PassaufNative.parseMrz(lines)
 
