@@ -7,6 +7,9 @@ import android.view.WindowManager
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -50,6 +53,12 @@ import zone.ave.passauf.ui.WaitingScreen
  * Reader mode stays on while the activity is in front, and the view model
  * decides whether a tag that turns up is one we currently want.
  */
+/** How far apart the platform checks that the document is still there. */
+private const val PRESENCE_CHECK_DELAY = 5000
+
+/** How long to leave discovery off for, so that turning it back on takes effect. */
+private const val READER_RESTART_PAUSE = 300L
+
 class MainActivity : ComponentActivity() {
 
     private val viewModel: ReaderViewModel by viewModels()
@@ -84,6 +93,17 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Every time the app starts waiting for a document, including a retry with the
+        // same one still held against the phone.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                viewModel.state
+                    .map { it is ReadState.WaitingForTag }
+                    .distinctUntilChanged()
+                    .collect { waiting -> if (waiting) restartReaderMode() }
+            }
+        }
+
         setContent {
             PassaufTheme {
                 PassaufApp(
@@ -96,22 +116,52 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Reader mode keeps the platform from firing its own tag intents at us,
-        // which would otherwise restart the activity mid-read.
+        startReaderMode()
+    }
+
+    /**
+     * Start looking for a document.
+     *
+     * Reader mode keeps the platform from firing its own tag intents at us, which would
+     * otherwise restart the activity mid-read.
+     */
+    private fun startReaderMode() {
         nfcAdapter?.enableReaderMode(
             this,
             { tag -> viewModel.onTagDiscovered(tag) },
-            // eMRTDs are ISO/IEC 14443 type A or B, and never have an NDEF
-            // message to look for.
+            // eMRTDs are ISO/IEC 14443 type A or B, and never have an NDEF message to
+            // look for.
             NfcAdapter.FLAG_READER_NFC_A or
                 NfcAdapter.FLAG_READER_NFC_B or
                 NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
             Bundle().apply {
-                // A document sitting against the back of a phone answers slowly
-                // enough that the default presence check can drop it mid-read.
-                putInt(NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY, 5000)
+                // A document sitting against the back of a phone answers slowly enough
+                // that the default presence check can drop it mid-read.
+                putInt(NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY, PRESENCE_CHECK_DELAY)
             },
         )
+    }
+
+    /**
+     * Look again, for a document that never went away.
+     *
+     * A tag is handed over once, when it is discovered, and the platform will not offer
+     * the same one twice. It stops counting a tag as present only when a presence check
+     * fails, and this app asks for those five seconds apart so that a slow chip is not
+     * dropped part way through a read.
+     *
+     * The two together mean that after one read, the document lying against the phone is
+     * still "there" as far as the platform is concerned. Moving it does nothing, and
+     * taking it away needs several seconds to register before putting it back counts as
+     * a new arrival. Turning reader mode off and on starts discovery over, so a document
+     * that never moved is found again immediately.
+     */
+    private suspend fun restartReaderMode() {
+        nfcAdapter?.disableReaderMode(this)
+        // Long enough for the controller to actually drop its discovery loop; without
+        // it the enable can land before the disable has taken effect.
+        delay(READER_RESTART_PAUSE)
+        startReaderMode()
     }
 
     override fun onPause() {
