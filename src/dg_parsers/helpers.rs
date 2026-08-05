@@ -388,7 +388,7 @@ pub fn parse_mrz_document_code(document_code: &String, country_code: &String) ->
             return "ID Card".to_string();
         }
         "ID" => {
-            if ["DNK", "BEL", "PLN"].contains(&country_code.as_str()) {
+            if ["DNK", "BEL", "POL"].contains(&country_code.as_str()) {
                 return "ID or Residence Permit Card".to_string();
             }
             return "ID Card".to_string();
@@ -405,7 +405,7 @@ pub fn parse_mrz_document_code(document_code: &String, country_code: &String) ->
             return "Residence Permit Card".to_string();
         }
         "IB" | "IW" | "IK" | "IE" | "IO" | "IF" | "IZ" => {
-            if country_code == "PLN" {
+            if country_code == "POL" {
                 return "Residence Permit Card".to_string();
             }
         }
@@ -554,6 +554,29 @@ mod tests {
         assert_eq!(
             parse_mrz_document_code(&"PT".to_string(), &"UTO".to_string()),
             "Passport"
+        );
+    }
+
+    /// Poland is POL. PLN is the currency, and while it was in here these two branches
+    /// could not be reached by any document.
+    #[test]
+    fn polish_codes_use_the_country_not_the_currency() {
+        assert_eq!(
+            parse_mrz_document_code(&"ID".to_string(), &"POL".to_string()),
+            "ID or Residence Permit Card"
+        );
+        assert_eq!(
+            parse_mrz_document_code(&"IB".to_string(), &"POL".to_string()),
+            "Residence Permit Card"
+        );
+        // Elsewhere the same codes mean what they meant before.
+        assert_eq!(
+            parse_mrz_document_code(&"ID".to_string(), &"UTO".to_string()),
+            "ID Card"
+        );
+        assert_eq!(
+            parse_mrz_document_code(&"IB".to_string(), &"UTO".to_string()),
+            "ID Card (likely)"
         );
     }
 
