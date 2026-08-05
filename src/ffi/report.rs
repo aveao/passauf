@@ -596,9 +596,16 @@ fn details(parsed: &ParsedDataGroup) -> Vec<Detail> {
                     types::ef_cardaccess::SecurityInfo::Pace(pace_info) => {
                         details.push(Detail::new("PACE", pace_info.to_string()))
                     }
-                    types::ef_cardaccess::SecurityInfo::Unknown(unknown) => details.push(
-                        Detail::new("Other", types::ef_cardaccess::format_oid(&unknown.protocol)),
-                    ),
+                    types::ef_cardaccess::SecurityInfo::Unknown(unknown) => {
+                        let oid = types::ef_cardaccess::format_oid(&unknown.protocol);
+                        // Named where the standard names it, and always with the
+                        // identifier itself, so nothing is taken on trust.
+                        let value = match types::ef_cardaccess::describe_protocol_oid(&oid) {
+                            Some(name) => format!("{}\n{}", name, oid),
+                            None => oid,
+                        };
+                        details.push(Detail::new("Other", value));
+                    }
                 }
             }
         }

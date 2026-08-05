@@ -9,7 +9,7 @@ use crate::helpers;
 use crate::pace::oids::PaceAlgorithm;
 use crate::types;
 use crate::types::ef_cardaccess::{
-    format_oid, EFCardAccess, PaceInfo, SecurityInfo, UnknownSecurityInfo,
+    describe_protocol_oid, format_oid, EFCardAccess, PaceInfo, SecurityInfo, UnknownSecurityInfo,
 };
 
 /// DER tags used inside SecurityInfos.
@@ -65,12 +65,22 @@ impl types::EFCardAccess {
                     );
                 }
                 SecurityInfo::Unknown(unknown) => {
-                    info!(
-                        "{:>pad_len$} <yellow>{}</>",
-                        "SecurityInfo",
-                        format_oid(&unknown.protocol),
-                        pad_len = 15
-                    );
+                    let oid = format_oid(&unknown.protocol);
+                    match describe_protocol_oid(&oid) {
+                        Some(name) => info!(
+                            "{:>pad_len$} <yellow>{}</> <d>({})</>",
+                            "SecurityInfo",
+                            name,
+                            oid,
+                            pad_len = 15
+                        ),
+                        None => info!(
+                            "{:>pad_len$} <yellow>{}</>",
+                            "SecurityInfo",
+                            oid,
+                            pad_len = 15
+                        ),
+                    }
                 }
             }
         }
