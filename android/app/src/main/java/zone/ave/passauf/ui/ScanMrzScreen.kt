@@ -63,6 +63,11 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -85,9 +90,26 @@ import kotlin.math.roundToInt
  * numbers err generous in both cases, because the guide only has to *contain* the
  * zone, and a box with room to spare is far easier to aim than a tight one.
  */
-enum class DocumentShape(val label: String, val aspect: Float) {
-    Passport("Passport", 9f),
-    Card("ID / licence", 5f),
+enum class DocumentShape(
+    val label: String,
+    /** Width of the aiming box against its height. */
+    val aspect: Float,
+    /** Rows the zone is printed in, and characters in each. */
+    val rows: Int,
+    val columns: Int,
+    /** Width of the whole document against its height. */
+    val documentAspect: Float,
+    /** How much of the document's width the zone spans. */
+    val zoneWidthOfDocument: Float,
+    /** Gap under the zone, as a share of the document's height. */
+    val zoneBottomMargin: Float,
+) {
+    // A passport's data page is ID-3, 125 by 88mm, and its zone is two rows of 44
+    // characters at the 2.54mm pitch ICAO specifies — 111.8mm of the 125.
+    Passport("Passport", 9f, 2, 44, 125f / 88f, 111.8f / 125f, 0.06f),
+
+    // A card is ID-1, 85.6 by 54mm, with three rows of 30: 76.2mm of the 85.6.
+    Card("ID / licence", 5f, 3, 30, 85.6f / 54f, 76.2f / 85.6f, 0.08f),
 }
 
 /** How much of the frame's width is read, whatever the guide happens to show. */
@@ -118,6 +140,18 @@ private const val GUIDE_FILL = 0.78f
  * This is why the leftmost characters were the ones coming back wrong.
  */
 private const val QUIET_BORDER = 0.25f
+
+/** Any size; the ghost row is measured at it and then scaled to fit. */
+private val GHOST_PROBE_SIZE = 64.sp
+
+/**
+ * How much of the box a ghost row spans.
+ *
+ * Under one, because a real zone read at this distance does not touch the sides of the
+ * box either — [GUIDE_FILL] leaves it room, and the ghost should show where the print
+ * actually lands rather than where the box ends.
+ */
+private const val GHOST_ROW_FILL = 0.94f
 
 /**
  * The camera wants a frame with enough pixels across to resolve single characters.
@@ -534,23 +568,57 @@ private fun Viewfinder(
     AndroidView(factory = { previewView }, modifier = modifier)
 }
 
-/** Dims everything outside the aiming guide and draws its outline. */
+/**
+ * Dims everything outside the aiming guide, and shows what is meant to go in it.
+ *
+ * An empty rectangle floating over a camera does not say what to do with it. So the box
+ * is drawn with a rough outline of the document around it, in the document's own
+ * proportions and with the box where the zone actually sits — near the bottom — and the
+ * box itself holds a ghost of the rows that belong there, at the right count, the right
+ * number of characters, and the size they end up when the document is the right distance
+ * away. Lining a document up against it is then a matter of matching two pictures rather
+ * than guessing what the rectangle wants.
+ */
 @Composable
 private fun GuideOverlay(shape: DocumentShape, modifier: Modifier = Modifier) {
+    val measurer = rememberTextMeasurer()
+    val ghost = remember(shape) { "<".repeat(shape.columns) }
+
     Canvas(
         modifier = modifier.graphicsLayer {
             // Punching a hole with BlendMode.Clear needs somewhere to punch it.
             compositingStrategy = CompositingStrategy.Offscreen
         }
     ) {
-        // Drawn smaller than the region actually read, by GUIDE_FILL. Both are centred
-        // on the frame, so the slack ends up evenly on all four sides.
         val width = size.width * ANALYSIS_WIDTH_FRACTION * GUIDE_FILL
         val height = (size.width * ANALYSIS_WIDTH_FRACTION / shape.aspect) * GUIDE_FILL
         val topLeft = Offset((size.width - width) / 2f, (size.height - height) / 2f)
         val guide = androidx.compose.ui.geometry.Size(width, height)
 
         drawRect(color = Color.Black.copy(alpha = 0.55f))
+
+        // The document around it, to its own proportions. Taller than the frame for a
+        // passport, which is fine and even honest: the page carries on past the edge.
+        val documentWidth = width / shape.zoneWidthOfDocument
+        val documentHeight = documentWidth / shape.documentAspect
+        val documentBottom = topLeft.y + height + documentHeight * shape.zoneBottomMargin
+        val documentTopLeft = Offset(
+            (size.width - documentWidth) / 2f,
+            documentBottom - documentHeight,
+        )
+        drawRoundRect(
+            color = Color.White.copy(alpha = 0.35f),
+            topLeft = documentTopLeft,
+            size = androidx.compose.ui.geometry.Size(documentWidth, documentHeight),
+            cornerRadius = CornerRadius(documentHeight * 0.04f),
+            style = Stroke(
+                width = 1.5.dp.toPx(),
+                pathEffect = PathEffect.dashPathEffect(
+                    floatArrayOf(12.dp.toPx(), 8.dp.toPx())
+                ),
+            ),
+        )
+
         drawRect(
             color = Color.Transparent,
             topLeft = topLeft,
@@ -563,6 +631,35 @@ private fun GuideOverlay(shape: DocumentShape, modifier: Modifier = Modifier) {
             size = guide,
             style = Stroke(width = 2.dp.toPx()),
         )
+
+        // A row of filler at the size the real thing lands at. Measured once at an
+        // arbitrary size and scaled, because what matters is that the characters span
+        // the box, not what point size that turns out to be.
+        val probe = measurer.measure(
+            ghost,
+            TextStyle(fontFamily = FontFamily.Monospace, fontSize = GHOST_PROBE_SIZE),
+        )
+        if (probe.size.width <= 0) {
+            return@Canvas
+        }
+        val style = TextStyle(
+            fontFamily = FontFamily.Monospace,
+            fontSize = GHOST_PROBE_SIZE * (width * GHOST_ROW_FILL / probe.size.width),
+            color = Color.White.copy(alpha = 0.30f),
+        )
+        val laid = measurer.measure(ghost, style)
+        val rowHeight = height / shape.rows
+        for (row in 0 until shape.rows) {
+            drawText(
+                textMeasurer = measurer,
+                text = ghost,
+                topLeft = Offset(
+                    topLeft.x + (width - laid.size.width) / 2f,
+                    topLeft.y + rowHeight * row + (rowHeight - laid.size.height) / 2f,
+                ),
+                style = style,
+            )
+        }
     }
 }
 
