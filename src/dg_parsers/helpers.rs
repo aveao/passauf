@@ -390,17 +390,26 @@ pub fn parse_mrz_sex(sex: char) -> String {
 ///
 /// Anything not listed falls through to the general rules below, so an unknown PS is
 /// still reported as a passport rather than as nothing at all.
+///
+/// Every pair that depends on the issuer lives here, cards as much as passports, and
+/// the lookup runs before any of the general rules. That makes this the one place to
+/// add another: a code that means something particular to one state is a row, not a
+/// condition buried in the match below, where it is invisible next to the rules that
+/// hold everywhere.
 const ISSUER_SPECIFIC_CODES: &[(&str, &str, &str)] = &[
     ("AUT", "PF", "Alien's Passport"),
+    ("BEL", "ID", "ID or Residence Permit Card"),
     ("BEL", "PS", "1954 Convention Travel Document"),
     ("CHE", "PS", "Passport for Foreigners"),
     ("CZE", "PC", "Alien's Passport"),
     ("CZE", "PU", "1951 Convention Travel Document"),
+    ("DNK", "ID", "ID or Residence Permit Card"),
     ("ESP", "DV", "Travel Document"),
     ("HRV", "PI", "Travel Document"),
     ("IRL", "PB", "Travel Document"),
     ("ISL", "PF", "1951 Convention Travel Document"),
     ("ISL", "PU", "Alien's Passport"),
+    ("ITA", "C<", "ID Card"),
     ("ITA", "PA", "1954 Convention Travel Document"),
     ("ITA", "PS", "Travel Document for Foreigners"),
     ("LTU", "PA", "1954 Convention Travel Document"),
@@ -415,6 +424,14 @@ const ISSUER_SPECIFIC_CODES: &[(&str, &str, &str)] = &[
     ("LVA", "PN", "Alien's Passport"),
     ("LVA", "PP", "Refugee Travel Document"),
     ("NOR", "PU", "Alien's Passport"),
+    ("POL", "IB", "Residence Permit Card"),
+    ("POL", "ID", "ID or Residence Permit Card"),
+    ("POL", "IE", "Residence Permit Card"),
+    ("POL", "IF", "Residence Permit Card"),
+    ("POL", "IK", "Residence Permit Card"),
+    ("POL", "IO", "Residence Permit Card"),
+    ("POL", "IW", "Residence Permit Card"),
+    ("POL", "IZ", "Residence Permit Card"),
     ("POL", "PC", "1951 Convention Travel Document"),
     ("POL", "PG", "1951 Convention Travel Document"),
     ("POL", "PP", "Travel Document for an Alien"),
@@ -442,7 +459,7 @@ pub fn format_country_code(code: &String) -> String {
 }
 
 pub fn parse_mrz_document_code(document_code: &String, country_code: &String) -> String {
-    // https://wf.lavatech.top/aves-tech-notes/emrtd-data-quirks see document type codes
+    // https://ave.zone/tech/emrtd-data-quirks see document type codes
     if document_code.len() != 2 {
         return document_code.to_string();
     }
@@ -460,19 +477,10 @@ pub fn parse_mrz_document_code(document_code: &String, country_code: &String) ->
     // organization except that i) V shall not be used, ii) I shall not be used after A (i.e. AI), and iii) C shall not be used
     // after A (i.e. AC) except in the crew member certificate."
 
+    // What follows holds wherever the document came from. Anything that does not is a
+    // row in ISSUER_SPECIFIC_CODES above, which has already had its turn.
     match document_code.as_str() {
-        "C<" => {
-            if country_code == "ITA" {
-                return "ID Card".to_string();
-            }
-        }
-        "I<" => {
-            return "ID Card".to_string();
-        }
-        "ID" => {
-            if ["DNK", "BEL", "POL"].contains(&country_code.as_str()) {
-                return "ID or Residence Permit Card".to_string();
-            }
+        "I<" | "ID" => {
             return "ID Card".to_string();
         }
         "IP" => {
@@ -486,11 +494,6 @@ pub fn parse_mrz_document_code(document_code: &String, country_code: &String) ->
         }
         "AD" | "AR" | "CR" | "IR" | "IT" | "RP" | "RT" => {
             return "Residence Permit Card".to_string();
-        }
-        "IB" | "IW" | "IK" | "IE" | "IO" | "IF" | "IZ" => {
-            if country_code == "POL" {
-                return "Residence Permit Card".to_string();
-            }
         }
         "AI" | "CV" | "AC" => {
             return format!("{} (Disallowed by ICAO 9303, Part 5)", document_code);
@@ -662,6 +665,25 @@ mod tests {
     #[test]
     fn an_issuer_code_that_is_not_a_passport_still_resolves() {
         assert_eq!(code("DV", "ESP"), "Travel Document");
+    }
+
+    /// The card codes that belong to one issuer, now that they are rows rather than
+    /// conditions inside the general rules.
+    ///
+    /// Same answers as before the move, which is the whole point of checking: the table
+    /// is consulted first, so a pair listed there never reaches the rules below, and a
+    /// pair that is not listed reaches them untouched.
+    #[test]
+    fn card_codes_can_belong_to_one_issuer_too() {
+        // C< is an Italian ID card and, anywhere else, a guess from its first letter.
+        assert_eq!(code("C<", "ITA"), "ID Card");
+        assert_eq!(code("C<", "UTO"), "ID Card (likely)");
+
+        // Three states put residence permits on the same code as their ID cards.
+        assert_eq!(code("ID", "BEL"), "ID or Residence Permit Card");
+        assert_eq!(code("ID", "DNK"), "ID or Residence Permit Card");
+        assert_eq!(code("ID", "POL"), "ID or Residence Permit Card");
+        assert_eq!(code("ID", "ITA"), "ID Card");
     }
 
     /// A marker of X and an unfilled field arrive as different characters and mean

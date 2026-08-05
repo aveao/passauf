@@ -69,7 +69,7 @@ Accessing an eMRTD works like so:
 - At a later point, I'll implement certificate verification for the document.
 
 Helpful links from my last implementation:
-- [I have a list of known quirks in eMRTD data](https://wf.lavatech.top/aves-tech-notes/emrtd-data-quirks), which implementations have to account for.
+- [I have a list of known quirks in eMRTD data](https://ave.zone/tech/emrtd-data-quirks), which implementations have to account for.
 - [Here's a list of eMRTDs that are known to work with my other implementation, I suspect they'd all work with this too](https://github.com/RfidResearchGroup/proxmark3/issues/1117).
 
 So far I only plan to support LDS1, but if I find any eMRTDs supporting LDS2 I may look into it.
