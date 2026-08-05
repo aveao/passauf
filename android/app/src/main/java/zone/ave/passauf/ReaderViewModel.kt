@@ -109,6 +109,30 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * Take the fields off a scanned machine readable zone and go straight to the chip.
+     *
+     * No stop at the form on the way. The camera only reports a zone once every check
+     * digit in it has passed, so there is nothing here for the user to check that has
+     * not already been checked more thoroughly than they could; showing them the three
+     * fields to confirm would be asking them to approve arithmetic.
+     *
+     * Filling the form and arming together rather than leaving the caller to do both:
+     * the two have to happen in that order and with nothing in between, which is a rule
+     * about this state machine and belongs next to it.
+     */
+    fun useScannedMrz(scanned: PassaufNative.ScannedMrz) {
+        _form.update { form ->
+            form.copy(
+                kind = KeyKind.MRZ,
+                documentNumber = scanned.documentNumber,
+                dateOfBirth = scanned.dateOfBirth,
+                dateOfExpiry = scanned.dateOfExpiry,
+            )
+        }
+        armScanner()
+    }
+
     fun backToForm() {
         _state.value = ReadState.Editing
     }

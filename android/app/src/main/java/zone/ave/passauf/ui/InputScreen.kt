@@ -44,6 +44,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import zone.ave.passauf.AccessForm
 import zone.ave.passauf.KeyKind
+import zone.ave.passauf.PassaufNative
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -62,6 +63,7 @@ fun InputScreen(
     form: AccessForm,
     onChange: ((AccessForm) -> AccessForm) -> Unit,
     onReady: () -> Unit,
+    onScanned: (PassaufNative.ScannedMrz) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // Local to this screen rather than a state in the ViewModel: scanning is a way of
@@ -72,16 +74,11 @@ fun InputScreen(
     if (scanning) {
         BackHandler { scanning = false }
         ScanMrzScreen(
+            // Straight on to the chip. The scanner does not report a zone until every
+            // check digit in it has passed, so there is nothing left to confirm.
             onFound = { scanned ->
-                onChange {
-                    it.copy(
-                        kind = KeyKind.MRZ,
-                        documentNumber = scanned.documentNumber,
-                        dateOfBirth = scanned.dateOfBirth,
-                        dateOfExpiry = scanned.dateOfExpiry,
-                    )
-                }
                 scanning = false
+                onScanned(scanned)
             },
             onCancel = { scanning = false },
             modifier = modifier,

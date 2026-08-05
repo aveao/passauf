@@ -128,6 +128,7 @@ private fun PassaufApp(viewModel: ReaderViewModel, nfcEnabled: Boolean) {
                 form = form,
                 onChange = viewModel::updateForm,
                 onReady = viewModel::armScanner,
+                onScanned = viewModel::useScannedMrz,
                 modifier = modifier,
             )
             is ReadState.WaitingForTag -> WaitingScreen(
