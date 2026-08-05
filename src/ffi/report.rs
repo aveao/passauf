@@ -592,24 +592,28 @@ fn details(parsed: &ParsedDataGroup) -> Vec<Detail> {
         #[cfg(feature = "pace")]
         ParsedDataGroup::EFCardAccess(card_access) => {
             for security_info in card_access.security_infos.iter() {
+                // The identifier is what each entry is; the label may as well say so.
+                // "Other" carried nothing, and the name it was hiding was repeated
+                // underneath it — one line per entry says the same thing in half the
+                // room. "Other" is left for the ones we genuinely cannot name.
                 match security_info {
-                    // Every entry reads the same way: what it is, then the identifier
-                    // it said so with. Two lines also puts it under its label rather
-                    // than beside it, which a dotted OID needs the width for.
                     types::ef_cardaccess::SecurityInfo::Pace(pace_info) => {
                         let oid =
                             types::ef_cardaccess::format_oid(&pace_info.algorithm.to_oid_bytes());
-                        details.push(Detail::new("PACE", format!("{}\n{}", pace_info, oid)));
+                        let mut value = oid.clone();
+                        value.push_str(&format!(", version {}", pace_info.version));
+                        if let Some(parameter_id) = pace_info.parameter_id {
+                            value.push_str(&format!(", domain parameter {}", parameter_id));
+                        }
+                        let label = types::ef_cardaccess::describe_protocol_oid(&oid)
+                            .unwrap_or_else(|| "PACE".to_string());
+                        details.push(Detail::new(&label, value));
                     }
                     types::ef_cardaccess::SecurityInfo::Unknown(unknown) => {
                         let oid = types::ef_cardaccess::format_oid(&unknown.protocol);
-                        // Named where the standard names it, and always with the
-                        // identifier itself, so nothing is taken on trust.
-                        let value = match types::ef_cardaccess::describe_protocol_oid(&oid) {
-                            Some(name) => format!("{}\n{}", name, oid),
-                            None => format!("Unrecognised protocol\n{}", oid),
-                        };
-                        details.push(Detail::new("Other", value));
+                        let label = types::ef_cardaccess::describe_protocol_oid(&oid)
+                            .unwrap_or_else(|| "Other".to_string());
+                        details.push(Detail::new(&label, oid));
                     }
                 }
             }
