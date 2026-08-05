@@ -82,8 +82,7 @@ impl EFCardAccess {
     }
 }
 
-/// Every protocol object identifier BSI TR-03110 defines under `bsi-de`, with the name
-/// the standard gives it.
+/// The object identifiers a document can name, with the names the standards give them.
 ///
 /// EF.CardAccess is a set of SecurityInfos, and each one opens with one of these. Only
 /// PACE is modelled in detail, because only PACE is something passauf can carry out —
@@ -91,9 +90,13 @@ impl EFCardAccess {
 /// something about itself, and printing a bare `0.4.0.127.0.7.2.2.2` at someone amounts
 /// to withholding it.
 ///
-/// Taken from the ASN.1 in TR-03110 Part 3 Annex A rather than typed out, and kept to
-/// the `protocols(2) smartcard(2)` subtree: the auxiliary data identifiers under
-/// `applications(3)` are what a terminal sends, not what a chip advertises.
+/// Taken from the ASN.1 in the standards rather than typed out: TR-03110 Part 3 Annex A
+/// for `bsi-de`, ICAO 9303 Part 11 for the PACE-CAM branch it adds to that tree, and
+/// Doc 9303-10 for ICAO's own arc.
+///
+/// Kept to what a document can name. TR-03110's auxiliary data identifiers under
+/// `applications(3)` are left out, being what a terminal sends rather than what a chip
+/// advertises.
 const BSI_PROTOCOL_OIDS: &[(&str, &str)] = &[
     ("0.4.0.127.0.7.2.2.1", "id-PK"),
     ("0.4.0.127.0.7.2.2.1.1", "id-PK-DH"),
@@ -162,6 +165,22 @@ const BSI_PROTOCOL_OIDS: &[(&str, &str)] = &[
         "0.4.0.127.0.7.2.2.4.4.4",
         "id-PACE-ECDH-IM-AES-CBC-CMAC-256",
     ),
+    // ICAO 9303 p11 9.2.1 adds this branch to BSI's tree. It is absent from TR-03110
+    // Part 3, which is why extracting that alone missed it — and it is the one variant
+    // passauf actually carries out.
+    ("0.4.0.127.0.7.2.2.4.6", "id-PACE-ECDH-CAM"),
+    (
+        "0.4.0.127.0.7.2.2.4.6.2",
+        "id-PACE-ECDH-CAM-AES-CBC-CMAC-128",
+    ),
+    (
+        "0.4.0.127.0.7.2.2.4.6.3",
+        "id-PACE-ECDH-CAM-AES-CBC-CMAC-192",
+    ),
+    (
+        "0.4.0.127.0.7.2.2.4.6.4",
+        "id-PACE-ECDH-CAM-AES-CBC-CMAC-256",
+    ),
     ("0.4.0.127.0.7.2.2.5", "id-RI"),
     ("0.4.0.127.0.7.2.2.5.1", "id-RI-DH"),
     ("0.4.0.127.0.7.2.2.5.1.1", "id-RI-DH-SHA-1"),
@@ -190,6 +209,62 @@ const BSI_PROTOCOL_OIDS: &[(&str, &str)] = &[
     ("0.4.0.127.0.7.2.2.12.2", "id-CAN"),
     ("0.4.0.127.0.7.2.2.12.3", "id-PIN"),
     ("0.4.0.127.0.7.2.2.12.4", "id-PUK"),
+    // ICAO's own arc (Doc 9303-10). Only aaProtocolObject is a SecurityInfo protocol —
+    // it is what DG14 carries to say Active Authentication uses ECDSA — but the rest
+    // name the signed objects around a document, and meeting one of those as bare
+    // digits is no more useful than meeting a protocol that way.
+    ("2.23.136", "id-icao"),
+    ("2.23.136.1", "id-icao-mrtd"),
+    ("2.23.136.1.1", "id-icao-mrtd-security"),
+    ("2.23.136.1.1.1", "id-icao-mrtd-security-ldsSecurityObject"),
+    ("2.23.136.1.1.2", "id-icao-mrtd-security-cscaMasterList"),
+    (
+        "2.23.136.1.1.3",
+        "id-icao-mrtd-security-cscaMasterListSigningKey",
+    ),
+    ("2.23.136.1.1.4", "id-icao-mrtd-security-documentTypeList"),
+    ("2.23.136.1.1.5", "id-icao-mrtd-security-aaProtocolObject"),
+    ("2.23.136.1.1.6", "id-icao-mrtd-security-extensions"),
+    (
+        "2.23.136.1.1.6.1",
+        "id-icao-mrtd-security-extensions-nameChange",
+    ),
+    (
+        "2.23.136.1.1.6.2",
+        "id-icao-mrtd-security-extensions-documentTypeList",
+    ),
+    ("2.23.136.1.1.7", "id-icao-mrtd-security-DeviationList"),
+    (
+        "2.23.136.1.1.8",
+        "id-icao-mrtd-security-DeviationListSigningKey",
+    ),
+    ("2.23.136.1.1.9", "id-icao-lds2"),
+    ("2.23.136.1.1.9.1", "id-icao-lds2-travelRecords"),
+    (
+        "2.23.136.1.1.9.1.1",
+        "id-icao-lds2-travelRecords-application",
+    ),
+    ("2.23.136.1.1.9.1.3", "id-icao-lds2-travelRecords-access"),
+    ("2.23.136.1.1.9.2", "id-icao-lds2-visaRecords"),
+    ("2.23.136.1.1.9.2.1", "id-icao-lds2-visaRecords-application"),
+    ("2.23.136.1.1.9.2.3", "id-icao-lds2-visaRecords-access"),
+    ("2.23.136.1.1.9.3", "id-icao-lds2-additionalBiometrics"),
+    (
+        "2.23.136.1.1.9.3.1",
+        "id-icao-lds2-additionalBiometrics-application",
+    ),
+    (
+        "2.23.136.1.1.9.3.3",
+        "id-icao-lds2-additionalBiometrics-access",
+    ),
+    ("2.23.136.1.1.9.8", "id-icao-lds2Signer"),
+    ("2.23.136.1.1.9.8.1", "id-icao-tsSigner"),
+    ("2.23.136.1.1.9.8.2", "id-icao-vSigner"),
+    ("2.23.136.1.1.9.8.3", "id-icao-bSigner"),
+    ("2.23.136.1.1.10", "id-icao-spoc"),
+    ("2.23.136.1.1.10.1", "id-icao-spocClient"),
+    ("2.23.136.1.1.10.2", "id-icao-spocServer"),
+    ("2.23.136.1.1.13", "id-EFDIR"),
 ];
 
 /// What each family of those identifiers is for, by prefix.
@@ -207,6 +282,13 @@ const BSI_PROTOCOL_FAMILIES: &[(&str, &str)] = &[
     ("0.4.0.127.0.7.2.2.8", "Privileged terminal"),
     ("0.4.0.127.0.7.2.2.11", "Pseudonymous signature"),
     ("0.4.0.127.0.7.2.2.12", "Password type"),
+    (
+        "0.4.0.127.0.7.2.2.4.6",
+        "PACE with Chip Authentication Mapping",
+    ),
+    ("2.23.136.1.1.5", "Active Authentication"),
+    ("2.23.136.1.1.9", "LDS2"),
+    ("2.23.136", "ICAO"),
 ];
 
 /// Name a SecurityInfo's protocol, given its object identifier in dotted form.
@@ -295,6 +377,34 @@ mod tests {
         assert_eq!(
             describe_protocol_oid("0.4.0.127.0.7.2.2.12.2"),
             Some("Password type (id-CAN)".to_string())
+        );
+    }
+
+    /// PACE-CAM lives in BSI's tree but is ICAO's addition to it, so it is absent from
+    /// TR-03110 and was missed by reading that alone. It is also the variant passauf
+    /// actually performs, which made it the worst one to have missing.
+    #[test]
+    fn names_the_branch_icao_adds_to_bsis_tree() {
+        assert_eq!(
+            describe_protocol_oid("0.4.0.127.0.7.2.2.4.6.4"),
+            Some(
+                "PACE with Chip Authentication Mapping (id-PACE-ECDH-CAM-AES-CBC-CMAC-256)"
+                    .to_string()
+            )
+        );
+    }
+
+    /// DG14 says Active Authentication uses ECDSA by carrying this, and it is the one
+    /// SecurityInfo protocol that lives in ICAO's own arc rather than BSI's.
+    #[test]
+    fn names_icaos_own_arc() {
+        assert_eq!(
+            describe_protocol_oid("2.23.136.1.1.5"),
+            Some("Active Authentication (id-icao-mrtd-security-aaProtocolObject)".to_string())
+        );
+        assert_eq!(
+            describe_protocol_oid("2.23.136.1.1.1"),
+            Some("ICAO (id-icao-mrtd-security-ldsSecurityObject)".to_string())
         );
     }
 
