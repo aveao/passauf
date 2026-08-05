@@ -129,6 +129,22 @@ pub enum SessionError {
     NoFileList,
 }
 
+impl SessionError {
+    /// A short, stable name for what went wrong.
+    ///
+    /// The app decides what to offer from this rather than from the sentence below:
+    /// wrong details and a document that slipped are both "could not read it", but one
+    /// of them is worth trying again unchanged and the other is not.
+    pub fn kind(&self) -> &'static str {
+        return match self {
+            SessionError::AuthenticationFailed(_) => "authentication",
+            SessionError::CanNeedsPace => "canNeedsPace",
+            SessionError::PaceUnavailable => "paceUnavailable",
+            SessionError::NoFileList => "noFileList",
+        };
+    }
+}
+
 impl fmt::Display for SessionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         return match self {
@@ -500,12 +516,22 @@ where
             info!("Selecting eMRTD LDS1 applet");
             let _ = iso7816::apdu_select_file_by_name(icao9303::AID_MRTD_LDS1.to_vec())
                 .exchange(smartcard, true);
-            let sm = icao9303::do_bac_authentication(
+            let sm = match icao9303::do_bac_authentication(
                 smartcard,
                 document_number,
                 date_of_birth,
                 date_of_expiry,
-            );
+            ) {
+                Some(sm) => sm,
+                // The document derived a different key from the one we did. It cannot
+                // say which of the three fields was wrong, only that the result did
+                // not match.
+                None => {
+                    return Err(SessionError::AuthenticationFailed(
+                        "the document refused the key derived from the details given".to_string(),
+                    ))
+                }
+            };
             (sm, Authentication::Bac)
         }
     };

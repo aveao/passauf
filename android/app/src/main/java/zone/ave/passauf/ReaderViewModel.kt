@@ -89,6 +89,14 @@ sealed interface ReadState {
         val directory: File?,
         /** What this read was unlocked with, so a failure can name the right fields. */
         val keyKind: KeyKind,
+        /**
+         * Whether the document stopped answering part way through.
+         *
+         * Known here rather than inferred from the report, because this is the side that
+         * lost it: the tag threw, and nothing downstream can tell that apart from a
+         * document that simply refused.
+         */
+        val tagLost: Boolean = false,
         /** False once the read's files have been deleted, by us or by the user. */
         val filesOnDisk: Boolean = true,
     ) : ReadState
@@ -221,6 +229,10 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             var directory: File? = null
+            // Set the moment the tag stops answering. Every later exchange is then
+            // refused outright rather than waiting out its own timeout, which is what
+            // made losing a document take so long to report.
+            val lost = java.util.concurrent.atomic.AtomicBoolean(false)
             try {
                 isoDep.connect()
                 // Reading DG2 off a slow chip takes a while per APDU, and the
@@ -245,12 +257,17 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                                 Log.i(TAG, "Read abandoned; answering no further APDUs.")
                                 null
                             }
+                            // Once it is gone it is gone. Trying the next exchange
+                            // anyway just waits out another timeout before failing the
+                            // same way.
+                            lost.get() -> null
                             else -> try {
                                 isoDep.transceive(apdu)
                             } catch (error: IOException) {
                                 // The document moved. Returning null lets passauf
                                 // unwind cleanly and report what it already has.
                                 Log.w(TAG, "Lost the tag mid-exchange", error)
+                                lost.set(true)
                                 null
                             }
                         }
@@ -262,7 +279,8 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                 // A read the user walked away from must not write itself over whatever
                 // they are looking at now.
                 if (isActive) {
-                    _state.value = ReadState.Finished(report, directory, form.kind)
+                    _state.value =
+                        ReadState.Finished(report, directory, form.kind, lost.get())
                 }
             } catch (abandoned: CancellationException) {
                 Log.i(TAG, "Read abandoned.")
@@ -281,6 +299,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                     ),
                     directory,
                     form.kind,
+                    lost.get(),
                 )
             } finally {
                 runCatching { isoDep.close() }

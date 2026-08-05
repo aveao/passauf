@@ -22,6 +22,12 @@ pub struct Report {
     /// Why not, when it wasn't.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// A short, stable name for that reason, from [`session::SessionError::kind`].
+    ///
+    /// The sentence above is for reading; this is for deciding what to offer. Absent
+    /// when the read failed some other way, such as a panic.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authentication: Option<AuthenticationReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -188,6 +194,7 @@ pub fn build(read: &DocumentRead, log: Vec<String>) -> Report {
     return Report {
         ok: true,
         error: None,
+        error_kind: None,
         authentication: Some(authentication(&read.authentication)),
         chip_authentication: Some(chip_authentication(&read.chip_authentication)),
         integrity: Some(integrity(&read.integrity)),
@@ -669,6 +676,7 @@ mod tests {
     fn serializes_the_keys_the_app_expects() {
         let report = Report {
             ok: true,
+            error_kind: None,
             authentication: Some(AuthenticationReport {
                 method: "PACE".to_string(),
                 algorithm: Some("PACE-ECDH-CAM-AES-CBC-CMAC-256".to_string()),

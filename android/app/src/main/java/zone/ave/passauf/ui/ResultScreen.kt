@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Refresh
@@ -87,6 +88,8 @@ fun ResultScreen(
     report: DocumentReport,
     directory: File?,
     keyKind: KeyKind,
+    /** Whether the document stopped answering part way through. */
+    tagLost: Boolean,
     filesOnDisk: Boolean,
     /** Whether this read was recorded in detail, which changes what the log holds. */
     detailedLog: Boolean,
@@ -163,7 +166,7 @@ fun ResultScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         if (!report.ok) {
-            item { FailureCard(report, keyKind, onRetry) }
+            item { FailureCard(report, keyKind, tagLost, onRetry, onDone) }
         }
 
         report.document?.let { document ->
@@ -264,45 +267,105 @@ fun ResultScreen(
 }
 
 @Composable
-private fun FailureCard(report: DocumentReport, keyKind: KeyKind, onRetry: () -> Unit) {
+private fun FailureCard(
+    report: DocumentReport,
+    keyKind: KeyKind,
+    tagLost: Boolean,
+    onRetry: () -> Unit,
+    onEdit: () -> Unit,
+) {
+    // Three different problems wearing the same words. Which one it was decides what
+    // there is to do about it, and offering the wrong thing wastes someone's time in a
+    // loop: retrying unchanged after a mistyped date fails again, identically.
+    val details = when (keyKind) {
+        KeyKind.MRZ -> "document number, date of birth and date of expiry"
+        KeyKind.CAN -> "CAN"
+    }
+
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.errorContainer,
         ),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Could not read the document", style = MaterialTheme.typography.titleMedium)
             Text(
-                report.error ?: "No reason given.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Text(
-                // Naming the wrong fields would send someone checking a CAN
-                // they never entered.
-                when (keyKind) {
-                    KeyKind.MRZ ->
-                        "A wrong document number, date of birth or date of expiry is the most " +
-                            "likely cause, and the chip cannot tell you which of the three it " +
-                            "was. It is also possible the connection was lost: a document that " +
-                            "shifts out of range part way through looks the same from here."
-                    KeyKind.CAN ->
-                        "A wrong CAN is the most likely cause — it is the short number " +
-                            "printed on the document, not the document number. It is also " +
-                            "possible the connection was lost: a document that shifts out of " +
-                            "range part way through looks the same from here."
+                when {
+                    tagLost -> "The document moved away"
+                    report.errorKind == "authentication" -> "The document refused those details"
+                    else -> "Could not read the document"
                 },
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.titleMedium,
             )
-            Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.Refresh, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Retry as-is")
+
+            when {
+                tagLost -> {
+                    Text(
+                        "It stopped answering part way through. Reading takes a few seconds " +
+                            "and the document has to stay against the phone for all of them.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        "Lay the phone down, put the document flat on top of it, and leave " +
+                            "both alone until it finishes. Cases and thick covers shorten the " +
+                            "range; so does holding it by hand.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.Refresh, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Try again")
+                    }
+                    Text(
+                        "Keeps the $details you already gave.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+
+                report.errorKind == "authentication" -> {
+                    Text(
+                        "The chip builds its key from the $details and would not accept the " +
+                            "one this made. It cannot say which of them was wrong, only that " +
+                            "the result did not match.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        when (keyKind) {
+                            KeyKind.MRZ ->
+                                "Check them against the rows printed at the bottom of the " +
+                                    "document rather than the writing above them, and leave " +
+                                    "out the check digits."
+                            KeyKind.CAN ->
+                                "The CAN is the short number printed on the document itself, " +
+                                    "not the document number."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    // Deliberately no retry. The same details produce the same key and
+                    // the same refusal; the only way forward is to change them.
+                    Button(onClick = onEdit, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.Edit, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Check the details")
+                    }
+                }
+
+                else -> {
+                    Text(
+                        report.error ?: "No reason given.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.Refresh, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Try again")
+                    }
+                    Text(
+                        "Keeps the $details you already gave. Hold the document flat against " +
+                            "the back of the phone and keep it still.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
-            Text(
-                "Keeps the details you entered. Hold the document flat against the back of the " +
-                    "phone and keep it still.",
-                style = MaterialTheme.typography.bodySmall,
-            )
         }
     }
 }

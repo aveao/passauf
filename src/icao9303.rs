@@ -1,7 +1,7 @@
 use cbc::cipher::{inout::block_padding, BlockModeDecrypt, BlockModeEncrypt, KeyIvInit};
 use rand::RngExt;
 use sha1::{Digest, Sha1};
-use simplelog::{info, trace};
+use simplelog::{info, trace, warn};
 
 use crate::secure_messaging::{
     kdf, padding_method_2_pad, retail_mac, SecureMessaging, SmAlgorithm,
@@ -242,18 +242,23 @@ pub fn calculate_bac_eifd_and_mifd(
 
 /// Calculate session keys for BAC
 ///
-/// Returns KS.enc and KS.mac
+/// Returns KS.enc and KS.mac, or None if the document did not authenticate itself back.
 pub fn calculate_bac_session_keys(
     auth_resp: &[u8],
     k_enc: &[u8],
     rnd_ifd: &[u8],
     k_ifd: &[u8],
-) -> (Vec<u8>, Vec<u8>) {
+) -> Option<(Vec<u8>, Vec<u8>)> {
     // Decrypt data we receive as response to BAC EXTERNAL_AUTHENTICATE
     let dec_resp = tdes_dec(k_enc, &auth_resp);
     trace!("Decoded auth response: {:x?}", dec_resp);
-    // Compare received RND.IFD with generated RND.IFD.
-    assert!(&dec_resp[8..16] == rnd_ifd);
+    // The document echoes our own random back, encrypted under the key it derived. Any
+    // other answer means it derived a different key from the one we did, and nothing
+    // after this point would decrypt to anything.
+    if dec_resp.len() < 32 || &dec_resp[8..16] != rnd_ifd {
+        warn!("The document did not echo our challenge back, so the keys do not match.");
+        return None;
+    }
 
     // Calculate K.seed = XOR(K.IFD, K.IC)
     let k_ic = &dec_resp[16..32];
@@ -269,7 +274,7 @@ pub fn calculate_bac_session_keys(
     let ks_mac = kdf(SmAlgorithm::Tdes, &k_seed, 2);
     trace!("KS.enc: {:x?}", ks_enc);
     trace!("KS.mac: {:x?}", ks_mac);
-    return (ks_enc, ks_mac);
+    return Some((ks_enc, ks_mac));
 }
 
 /// Calculates initial Send Sequence Counter for BAC
@@ -279,17 +284,29 @@ pub fn calculate_initial_ssc_bac(rnd_ic: &[u8], rnd_ifd: &[u8]) -> u64 {
 }
 
 /// Authenticate with Basic Access Control
+/// Establish a BAC session.
+///
+/// Returns None when the document refuses, which in practice means the three MRZ fields
+/// did not derive the key it expected. The chip does not say which of the three was
+/// wrong, and cannot: it only knows the MAC did not verify.
 pub fn do_bac_authentication(
     port: &mut Box<impl Smartcard + ?Sized>,
     document_number: &String,
     date_of_birth: &String,
     date_of_expiry: &String,
-) -> SecureMessaging {
+) -> Option<SecureMessaging> {
     info!("<d>Starting Basic Access Control</>");
 
     // Get RND.IC by calling GET_CHALLENGE.
     let mut apdu = iso7816::apdu_get_challenge();
-    let (rapdu, _) = apdu.exchange(port, true);
+    let (rapdu, status_code) = apdu.exchange(port, false);
+    if status_code != iso7816::StatusCode::Ok as u16 || rapdu.len() < 8 {
+        warn!(
+            "The document would not issue a challenge (0x{:04X}).",
+            status_code
+        );
+        return None;
+    }
     // get the first 8 bytes of the response, which is the actual response
     // (rest is SW and checksum)
     let rnd_ic = &rapdu[0..8];
@@ -315,7 +332,21 @@ pub fn do_bac_authentication(
     // Do EXTERNAL_AUTHENTICATION with the key and MAC we calculated.
     let external_auth_data = vec![e_ifd, m_ifd].concat();
     let mut apdu = iso7816::apdu_external_authentication(external_auth_data);
-    let (rapdu, _) = apdu.exchange(port, true);
+    let (rapdu, status_code) = apdu.exchange(port, false);
+    // 0x6300 is what a document answers when the MAC it was sent does not verify, which
+    // is to say when the key derived from the MRZ is not the one it holds. Asserting on
+    // the status here used to turn a mistyped date into a panic.
+    if status_code != iso7816::StatusCode::Ok as u16 {
+        warn!(
+            "The document rejected the authentication (0x{:04X}).",
+            status_code
+        );
+        return None;
+    }
+    if rapdu.len() < 40 {
+        warn!("The document's authentication response was too short to use.");
+        return None;
+    }
     info!("Successfully authenticated!");
 
     // Calculate session keys
@@ -324,13 +355,13 @@ pub fn do_bac_authentication(
         k_enc.as_slice(),
         rnd_ifd.as_slice(),
         k_ifd.as_slice(),
-    );
+    )?;
 
     // Calculate session counter
     let ssc = calculate_initial_ssc_bac(rnd_ic, &rnd_ifd);
 
     // Unlike PACE, BAC's counter doesn't start at zero.
-    return SecureMessaging::new_bac(ks_enc, ks_mac, ssc);
+    return Some(SecureMessaging::new_bac(ks_enc, ks_mac, ssc));
 }
 
 #[cfg(test)]

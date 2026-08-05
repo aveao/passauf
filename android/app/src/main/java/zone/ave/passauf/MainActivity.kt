@@ -261,6 +261,7 @@ private fun PassaufApp(viewModel: ReaderViewModel, nfcEnabled: Boolean) {
                 report = current.report,
                 directory = current.directory,
                 keyKind = current.keyKind,
+                tagLost = current.tagLost,
                 filesOnDisk = current.filesOnDisk,
                 detailedLog = form.detailedLog,
                 onDone = viewModel::backToForm,

@@ -149,8 +149,9 @@ pub extern "system" fn Java_zone_ave_passauf_PassaufNative_nativeReadDocument<'l
 
     let report = match outcome {
         Ok(Ok(read)) => report::build(&read, log),
-        Ok(Err(error)) => Report {
+        Ok(Err((kind, error))) => Report {
             log,
+            error_kind: Some(kind),
             ..Report::failure(error)
         },
         Err(payload) => Report {
@@ -317,7 +318,7 @@ fn read<'local>(
     transceiver: &JObject<'local>,
     progress: &JObject<'local>,
     options: Options,
-) -> Result<session::DocumentRead, String> {
+) -> Result<session::DocumentRead, (String, String)> {
     let access_key: AccessKey = options.access_key.into();
     let read_options = ReadOptions {
         file_prefix: options
@@ -340,7 +341,7 @@ fn read<'local>(
     };
 
     return session::read_document(&mut smartcard, &read_options, &mut report_progress)
-        .map_err(|error| error.to_string());
+        .map_err(|error| (error.kind().to_string(), error.to_string()));
 }
 
 /// Hand one APDU to `IsoDep.transceive` and bring the response back.
