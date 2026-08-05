@@ -65,6 +65,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import zone.ave.passauf.Detail
 import zone.ave.passauf.DocumentDetails
 import zone.ave.passauf.DocumentReport
@@ -859,6 +860,36 @@ private fun DetailRow(label: String, value: String?, monospaceValue: Boolean = f
     if (value.isNullOrBlank()) {
         return
     }
+
+    // A value with rows of its own cannot share a line with its label. A machine
+    // readable zone is forty four characters wide, which is more than the column beside
+    // a label leaves, so it would wrap halfway and the rows would stop being rows —
+    // which is the whole reason for splitting them up. Under the label at full width it
+    // keeps its shape, and scrolls sideways on a narrow screen rather than folding.
+    if (value.contains('\n')) {
+        Column(Modifier.padding(vertical = 3.dp)) {
+            Text(
+                label,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                value,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp,
+                // Rows keep their own length; the row of characters is the unit here,
+                // and letting it fold would undo the point.
+                softWrap = false,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+            )
+        }
+        return
+    }
+
     Row(Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.Top) {
         Text(
             label,
