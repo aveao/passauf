@@ -312,6 +312,66 @@ pub extern "system" fn Java_zone_ave_passauf_PassaufNative_nativeParseMrz<'local
     };
 }
 
+/// Rebuild a read from files the app unpacked out of an archive.
+///
+/// Takes a JSON array of paths, returns the same report shape a live read produces, with
+/// the session part left out because there was none. Touches no card, so it is nothing
+/// like the read above; it is the app asking what a folder of data groups amounts to.
+#[no_mangle]
+pub extern "system" fn Java_zone_ave_passauf_PassaufNative_nativeReadFiles<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    paths_json: JString<'local>,
+) -> jstring {
+    logger::install();
+    logger::begin_capture(LevelFilter::Info);
+
+    let paths_json: String = match env.get_string(&paths_json) {
+        Ok(text) => text.into(),
+        Err(error) => {
+            return to_java_string(
+                &mut env,
+                &Report::failure(format!("Could not read the file list: {}", error)),
+            )
+        }
+    };
+
+    let paths: Vec<String> = match serde_json::from_str(&paths_json) {
+        Ok(paths) => paths,
+        Err(error) => {
+            return to_java_string(
+                &mut env,
+                &Report::failure(format!("Could not understand the file list: {}", error)),
+            )
+        }
+    };
+
+    let mut files: Vec<(String, Vec<u8>)> = vec![];
+    for path in paths {
+        match std::fs::read(&path) {
+            Ok(bytes) => files.push((path, bytes)),
+            Err(error) => log::warn!("Could not read {}: {}", path, error),
+        }
+    }
+
+    // Same guard as the read above: the parsers below assert in places, and a file
+    // someone hand-edited is exactly the sort of input that finds one.
+    let outcome = catch_unwind(AssertUnwindSafe(|| session::read_from_files(&files)));
+    let log = logger::take_capture();
+
+    let report = match outcome {
+        Ok(read) => report::build(&read, log),
+        Err(payload) => Report {
+            log,
+            ..Report::failure(format!(
+                "passauf crashed while reading those files: {}",
+                panic_message(&payload)
+            ))
+        },
+    };
+    return to_java_string(&mut env, &report);
+}
+
 /// Everything that happens between the two JNI conversions.
 fn read<'local>(
     env_cell: &RefCell<JNIEnv<'local>>,

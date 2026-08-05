@@ -5,6 +5,7 @@ import android.net.Uri
 import java.io.File
 import java.time.LocalDate
 import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 /**
@@ -67,6 +68,38 @@ object Exporting {
                 }
             }
         }
+    }
+
+    /**
+     * Unpack a zip this app wrote earlier, and say where its files went.
+     *
+     * Entry names are reduced to bare filenames. A zip is an untrusted archive even when
+     * this app wrote the last one, and an entry called `../../databases/x` would
+     * otherwise be written exactly there.
+     *
+     * Nothing is interpreted here. What the files amount to is the library's question,
+     * and it answers it by parsing them rather than by being told.
+     */
+    fun importFrom(context: Context, source: Uri, into: File): List<File> {
+        val written = mutableListOf<File>()
+        into.mkdirs()
+
+        context.contentResolver.openInputStream(source)?.use { stream ->
+            ZipInputStream(stream.buffered()).use { zip ->
+                while (true) {
+                    val entry = zip.nextEntry ?: break
+                    val name = File(entry.name).name
+                    if (entry.isDirectory || name.isEmpty()) {
+                        continue
+                    }
+                    val target = File(into, name)
+                    target.outputStream().use { sink -> zip.copyTo(sink) }
+                    written.add(target)
+                }
+            }
+        }
+
+        return written
     }
 
     /** Write text out to the URI the user named. */

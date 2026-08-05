@@ -195,7 +195,8 @@ pub fn build(read: &DocumentRead, log: Vec<String>) -> Report {
         ok: true,
         error: None,
         error_kind: None,
-        authentication: Some(authentication(&read.authentication)),
+        // Absent for a read rebuilt from files: there was no session to describe.
+        authentication: read.authentication.as_ref().map(authentication),
         chip_authentication: Some(chip_authentication(&read.chip_authentication)),
         integrity: Some(integrity(&read.integrity)),
         document: Some(document(read)),

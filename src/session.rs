@@ -307,7 +307,9 @@ impl Integrity {
 /// Everything one read of a document produced.
 #[derive(Debug)]
 pub struct DocumentRead {
-    pub authentication: Authentication,
+    /// How the session was established, or None when there was no session: a read
+    /// rebuilt from files has no chip behind it and nothing to have authenticated with.
+    pub authentication: Option<Authentication>,
     pub chip_authentication: ChipAuthentication,
     /// Every file that was attempted, in the order they were read.
     pub files: Vec<FileRead>,
@@ -685,12 +687,132 @@ where
 
     progress(Progress::Done);
     return Ok(DocumentRead {
-        authentication,
+        authentication: Some(authentication),
         chip_authentication,
         files,
         integrity,
         warnings,
     });
+}
+
+/// Rebuild a read from files this app wrote out earlier.
+///
+/// Files are matched to data groups by name: a dump is written as `<prefix>-EF_DG1.bin`,
+/// so the part after the last dash says which file it is. Anything unrecognised is
+/// ignored rather than guessed at.
+///
+/// **Nothing about a session is reported, because there was none.** These are bytes off
+/// a disk, and how a chip was authenticated months ago on someone else's phone says
+/// nothing about the archive in front of you now. Remembering that in the file and
+/// replaying it later would be asserting something that was true once.
+///
+/// What *can* still be checked is checked, and means exactly what it always did: the
+/// data groups are hashed and held against the EF.SOD sitting beside them. That is a
+/// property of the archive itself and needs no document present. It shows the set is
+/// internally consistent — the same thing it shows after a live read, and no more.
+pub fn read_from_files(files: &[(String, Vec<u8>)]) -> DocumentRead {
+    let mut reads: Vec<FileRead> = vec![];
+    let mut warnings: Vec<String> = vec![];
+
+    for dg_info in types::DATA_GROUPS.iter() {
+        let wanted = dg_info.name.replace(".", "_");
+        let data = files
+            .iter()
+            .find(|(name, _)| file_stem_names(name) == wanted)
+            .map(|(_, bytes)| bytes.clone());
+        if data.is_none() {
+            continue;
+        }
+
+        let parsed = data
+            .as_ref()
+            .and_then(|bytes| (dg_info.parser)(bytes, dg_info, false));
+        reads.push(FileRead {
+            name: dg_info.name,
+            description: dg_info.description,
+            file_id: dg_info.file_id,
+            data,
+            parsed,
+            hash: HashCheck::NoSecurityObject,
+            dumped: vec![],
+        });
+    }
+
+    if reads.is_empty() {
+        warnings.push("No data groups were recognised in that file.".to_string());
+    }
+
+    let security_object = reads.iter().find_map(|file| match file.parsed {
+        Some(ParsedDataGroup::EFSOD(ref security_object)) => Some(security_object.clone()),
+        _ => None,
+    });
+
+    let mut integrity = Integrity {
+        security_object_read: security_object.is_some(),
+        hash_algorithm: security_object
+            .as_ref()
+            .map(|security_object| security_object.hash_algorithm.to_string()),
+        ..Default::default()
+    };
+
+    if let Some(ref security_object) = security_object {
+        for file in reads.iter_mut() {
+            let dg_info = types::DATA_GROUPS
+                .iter()
+                .find(|candidate| candidate.name == file.name);
+            let (dg_info, file_data) = match (dg_info, &file.data) {
+                (Some(dg_info), Some(file_data)) => (dg_info, file_data),
+                _ => continue,
+            };
+            if !dg_info.in_lds1 || dg_info.name == "EF.COM" || dg_info.name == "EF.SOD" {
+                continue;
+            }
+            file.hash = check_data_group_hash(security_object, dg_info, file_data);
+            match file.hash {
+                HashCheck::Matches => integrity.checked.push(dg_info.dg_num.into()),
+                HashCheck::Mismatch { .. } => {
+                    integrity.checked.push(dg_info.dg_num.into());
+                    integrity.mismatched.push(dg_info.dg_num.into());
+                }
+                _ => {}
+            }
+        }
+
+        integrity.unchecked = security_object
+            .data_group_hashes
+            .iter()
+            .filter(|data_group_hash| {
+                !integrity
+                    .checked
+                    .contains(&data_group_hash.data_group_number)
+            })
+            .map(|data_group_hash| data_group_hash.data_group_number)
+            .collect();
+    } else {
+        warnings.push(
+            "There is no EF.SOD in that file, so the data groups cannot be checked against \
+             anything."
+                .to_string(),
+        );
+    }
+
+    return DocumentRead {
+        authentication: None,
+        chip_authentication: ChipAuthentication::NotAttempted,
+        files: reads,
+        integrity,
+        warnings,
+    };
+}
+
+/// The data group a dumped file is named after, e.g. "EF_DG1" from "L898902C3-EF_DG1.bin".
+///
+/// Taken from after the last dash rather than by searching for a name inside the string,
+/// because "EF_DG1" is a prefix of "EF_DG11" and the wrong one would win.
+fn file_stem_names(filename: &str) -> String {
+    let stem = filename.rsplit('/').next().unwrap_or(filename);
+    let stem = stem.split('.').next().unwrap_or(stem);
+    return stem.rsplit('-').next().unwrap_or(stem).to_string();
 }
 
 /// The entry in [`types::DATA_GROUPS`] for a known file.

@@ -247,6 +247,7 @@ private fun PassaufApp(viewModel: ReaderViewModel, nfcEnabled: Boolean) {
                 onChange = viewModel::updateForm,
                 onReady = viewModel::armScanner,
                 onScanned = viewModel::useScannedMrz,
+                onOpenSaved = viewModel::openSavedRead,
                 modifier = modifier,
             )
             is ReadState.WaitingForTag -> WaitingScreen(
@@ -262,6 +263,7 @@ private fun PassaufApp(viewModel: ReaderViewModel, nfcEnabled: Boolean) {
                 directory = current.directory,
                 keyKind = current.keyKind,
                 tagLost = current.tagLost,
+                imported = current.imported,
                 filesOnDisk = current.filesOnDisk,
                 detailedLog = form.detailedLog,
                 onDone = viewModel::backToForm,

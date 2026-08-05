@@ -70,6 +70,30 @@ object PassaufNative {
 
     private external fun nativeParseMrz(text: String): String?
 
+    private external fun nativeReadFiles(pathsJson: String): String?
+
+    /**
+     * Work out what a folder of data groups amounts to.
+     *
+     * For opening a read that was saved earlier. Files are matched to data groups by
+     * name, and what comes back has no session in it, because there was none: how a chip
+     * was authenticated when these were written says nothing about the files now.
+     *
+     * The hash check still runs and still means what it always did — the data groups
+     * held against the EF.SOD beside them — because that is a property of the files
+     * themselves.
+     */
+    fun readFiles(paths: List<String>): DocumentReport {
+        val json = nativeReadFiles(passaufJson.encodeToString(paths))
+            ?: return DocumentReport(ok = false, error = "The passauf library returned nothing.")
+        return try {
+            passaufJson.decodeFromString<DocumentReport>(json)
+        } catch (error: Exception) {
+            Log.e(TAG, "Could not read what passauf made of those files.", error)
+            DocumentReport(ok = false, error = "Could not read what passauf returned.")
+        }
+    }
+
     /**
      * What a machine readable zone says, once one has been found.
      *

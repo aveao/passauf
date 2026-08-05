@@ -10,6 +10,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
@@ -64,8 +68,12 @@ fun InputScreen(
     onChange: ((AccessForm) -> AccessForm) -> Unit,
     onReady: () -> Unit,
     onScanned: (PassaufNative.ScannedMrz) -> Unit,
+    onOpenSaved: (Uri) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val openSaved = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { source -> source?.let(onOpenSaved) }
     // Local to this screen rather than a state in the ViewModel: scanning is a way of
     // filling the form in, not a step of reading a document, and the back stack should
     // treat it that way.
@@ -155,6 +163,15 @@ fun InputScreen(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("Scan document")
+        }
+
+        OutlinedButton(
+            onClick = { openSaved.launch(arrayOf("application/zip", "*/*")) },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(Icons.Filled.FolderOpen, contentDescription = null)
+            Spacer(Modifier.padding(horizontal = 4.dp))
+            Text("Open a saved read")
         }
 
         if (form.kind == KeyKind.CAN) {

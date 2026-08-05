@@ -227,10 +227,12 @@ fn main() {
     };
 
     match &result.authentication {
-        Authentication::Pace { algorithm } => {
+        Some(Authentication::Pace { algorithm }) => {
             info!("<d>Authenticated with PACE ({})</>", algorithm)
         }
-        Authentication::Bac => info!("<d>Authenticated with BAC</>"),
+        Some(Authentication::Bac) => info!("<d>Authenticated with BAC</>"),
+        // Only reachable for a read rebuilt from files, which the CLI does not do.
+        None => {}
     }
     match &result.chip_authentication {
         ChipAuthentication::Passed { source, curve } => info!(

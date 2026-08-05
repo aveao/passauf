@@ -1,6 +1,7 @@
 package zone.ave.passauf
 
 import android.app.Application
+import android.net.Uri
 import android.nfc.Tag
 import android.nfc.tech.IsoDep
 import android.util.Log
@@ -99,6 +100,8 @@ sealed interface ReadState {
         val tagLost: Boolean = false,
         /** False once the read's files have been deleted, by us or by the user. */
         val filesOnDisk: Boolean = true,
+        /** Whether this came out of a saved file rather than off a chip. */
+        val imported: Boolean = false,
     ) : ReadState
 }
 
@@ -176,6 +179,45 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     fun backToForm() {
         abandonRead()
         _state.value = ReadState.Editing
+    }
+
+    /**
+     * Open a read that was saved earlier.
+     *
+     * The archive holds the document's files and nothing else, so this parses them
+     * again rather than replaying anything: what is shown is what those bytes say now.
+     * Nothing about a session is reported, because a session is not a property of a
+     * file — the chip that answered is long out of the picture.
+     */
+    fun openSavedRead(source: Uri) {
+        abandonRead()
+        _state.value = ReadState.Reading("opening", "Opening the saved read")
+
+        readJob = viewModelScope.launch(Dispatchers.IO) {
+            val directory = documentDirectory(name = "imported")
+            val report = try {
+                val files = Exporting.importFrom(getApplication(), source, directory)
+                if (files.isEmpty()) {
+                    DocumentReport(ok = false, error = "There was nothing in that file.")
+                } else {
+                    PassaufNative.readFiles(files.map { it.absolutePath })
+                }
+            } catch (error: Throwable) {
+                Log.e(TAG, "Could not open the saved read", error)
+                DocumentReport(
+                    ok = false,
+                    error = error.message ?: error.javaClass.simpleName,
+                )
+            }
+            if (isActive) {
+                _state.value = ReadState.Finished(
+                    report = report,
+                    directory = directory,
+                    keyKind = _form.value.kind,
+                    imported = true,
+                )
+            }
+        }
     }
 
     /**
@@ -331,9 +373,11 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
      * directory, and taking a new one deletes the last, so at most one
      * document's files are ever on disk.
      */
-    private fun documentDirectory(form: AccessForm): File {
+    private fun documentDirectory(form: AccessForm): File = documentDirectory(form.dumpName())
+
+    private fun documentDirectory(name: String): File {
         val root = File(getApplication<Application>().cacheDir, "documents")
-        val directory = File(root, "${System.currentTimeMillis()}-${form.dumpName()}")
+        val directory = File(root, "${System.currentTimeMillis()}-$name")
         sweepDocuments(keep = directory)
         directory.mkdirs()
         return directory

@@ -90,6 +90,8 @@ fun ResultScreen(
     keyKind: KeyKind,
     /** Whether the document stopped answering part way through. */
     tagLost: Boolean,
+    /** Whether this came out of a saved file rather than off a chip. */
+    imported: Boolean,
     filesOnDisk: Boolean,
     /** Whether this read was recorded in detail, which changes what the log holds. */
     detailedLog: Boolean,
@@ -167,6 +169,10 @@ fun ResultScreen(
     ) {
         if (!report.ok) {
             item { FailureCard(report, keyKind, tagLost, onRetry, onDone) }
+        }
+
+        if (imported) {
+            item { ImportedCard() }
         }
 
         report.document?.let { document ->
@@ -1026,4 +1032,37 @@ private sealed interface PendingExport {
     data class Everything(override val name: String, val files: List<File>) : PendingExport
     data class Log(override val name: String, val text: String) : PendingExport
     data class One(override val name: String, val file: File) : PendingExport
+}
+
+/**
+ * Says where this came from, because it changes what the rest of the screen means.
+ *
+ * A read off a chip and a read off a disk look identical once they are on screen, and
+ * they are not the same claim. The files could have been edited since; nothing here
+ * establishes that a document was ever present, let alone that it was genuine. What the
+ * hash check still shows is the same as ever — that the data groups agree with the
+ * EF.SOD sitting beside them — because that holds for the files themselves.
+ */
+@Composable
+private fun ImportedCard() {
+    Card {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Opened from a file", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "These data groups were read from a saved archive, not from a document. " +
+                    "Nothing here shows that a chip was present or that it authenticated: " +
+                    "that happened wherever this was first read, if it happened at all, and " +
+                    "is not something a file can carry.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "The hash check below still means what it always does, because it is about " +
+                    "these files: the data groups either agree with the EF.SOD next to them " +
+                    "or they do not.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }
