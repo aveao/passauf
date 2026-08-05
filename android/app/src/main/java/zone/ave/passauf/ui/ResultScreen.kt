@@ -411,7 +411,7 @@ private fun IdentityCard(
             DetailRow("Issuing state", document.issuingState)
             DetailRow("Date of birth", formatDate(document.dateOfBirth))
             DetailRow("Date of expiry", formatDate(document.dateOfExpiry))
-            DetailRow("Legal sex", document.sex)
+            DetailRow("Legal Sex Marker", document.sex)
             DetailRow("Optional data", document.optionalData)
             DetailRow("MRZ format", document.mrzFormat)
             document.mrzChecksumsValid?.let { valid ->
