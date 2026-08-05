@@ -397,47 +397,110 @@ pub fn parse_mrz_sex(sex: char) -> String {
 /// condition buried in the match below, where it is invisible next to the rules that
 /// hold everywhere.
 const ISSUER_SPECIFIC_CODES: &[(&str, &str, &str)] = &[
+    ("AUT", "PE", "Emergency Passport"),
     ("AUT", "PF", "Alien's Passport"),
     ("BEL", "ID", "ID or Residence Permit Card"),
+    ("BEL", "PO", "Official Passport"),
     ("BEL", "PS", "1954 Convention Travel Document"),
+    ("BGR", "IX", "Residence Permit Card"),
+    ("CHE", "PA", "Passport"),
+    ("CHE", "PB", "Diplomatic Passport"),
+    ("CHE", "PC", "Service Passport"),
+    ("CHE", "PD", "Temporary Passport"),
+    ("CHE", "PE", "Diplomatic Passport"),
+    ("CHE", "PF", "Service Passport"),
+    ("CHE", "PM", "Passport"),
+    ("CHE", "PN", "Diplomatic Passport"),
+    ("CHE", "PO", "Service Passport"),
     ("CHE", "PS", "Passport for Foreigners"),
     ("CZE", "PC", "Alien's Passport"),
     ("CZE", "PU", "1951 Convention Travel Document"),
+    // Germany is D and not DEU. 9303 Part 3 gives it a one letter code, the MRZ pads it
+    // to D<<, and the filler comes off before this sees it. A row filed under DEU would
+    // never match anything.
+    ("D", "PC", "Child Passport"),
+    ("D", "PO", "Official Passport"),
     ("DNK", "ID", "ID or Residence Permit Card"),
     ("ESP", "DV", "Travel Document"),
+    ("ESP", "IX", "Residence Permit Card"),
+    // Not a state. The European Union issues travel documents of its own and has a code
+    // for it, and this table asks who issued a document rather than which country.
+    ("EUE", "PL", "Laissez-Passer"),
+    ("FRA", "CF", "Border Worker Card"),
+    // Croatia uses AD for residence permit cards, which is the general meaning of AD
+    // anyway. AB is a different document.
+    ("HRV", "AB", "Residence Card"),
+    ("HRV", "IO", "ID Card"),
     ("HRV", "PI", "Travel Document"),
+    ("HUN", "PH", "Seaman's Service Passport"),
+    ("HUN", "PS", "Foreign Service Passport"),
+    ("HUN", "PZ", "Service Passport"),
     ("IRL", "PB", "Travel Document"),
+    ("ISL", "PA", "Passport"),
     ("ISL", "PF", "1951 Convention Travel Document"),
     ("ISL", "PU", "Alien's Passport"),
     ("ITA", "C<", "ID Card"),
+    ("ITA", "CI", "ID Card"),
     ("ITA", "PA", "1954 Convention Travel Document"),
     ("ITA", "PS", "Travel Document for Foreigners"),
+    ("LTU", "AM", "Status Certificate"),
+    ("LTU", "JK", "Seaman's Book"),
     ("LTU", "PA", "1954 Convention Travel Document"),
+    ("LTU", "PE", "Emergency Passport"),
     ("LTU", "PP", "1951 Convention Travel Document"),
+    ("LTU", "PT", "Service Passport"),
     ("LTU", "PU", "Alien's Passport"),
+    ("LVA", "IE", "ID Card for EEA Citizens"),
+    ("LVA", "IN", "ID Card for Foreigners"),
     (
         "LVA",
         "PA",
         "Travel Document (Subsidiary Protection Status)",
     ),
     ("LVA", "PB", "Stateless Person Travel Document"),
+    ("LVA", "PJ", "Seaman's Discharge Book"),
     ("LVA", "PN", "Alien's Passport"),
     ("LVA", "PP", "Refugee Travel Document"),
+    ("NLD", "IW", "W-Type Asylum Seeker ID Card"),
+    ("NLD", "PE", "Emergency Passport"),
+    ("NLD", "PO", "Service Passport"),
+    ("NOR", "CA", "ID Card (eMRTD-variant)"),
     ("NOR", "PU", "Alien's Passport"),
-    ("POL", "IB", "Residence Permit Card"),
-    ("POL", "ID", "ID or Residence Permit Card"),
-    ("POL", "IE", "Residence Permit Card"),
-    ("POL", "IF", "Residence Permit Card"),
-    ("POL", "IK", "Residence Permit Card"),
-    ("POL", "IO", "Residence Permit Card"),
-    ("POL", "IW", "Residence Permit Card"),
-    ("POL", "IZ", "Residence Permit Card"),
+    ("NOR", "PV", "Passport"),
+    ("NOR", "XA", "ID Card (non-eMRTD-variant)"),
+    // Poland spells out what its residence documents are for, down to whether the
+    // holder is the family member of an EEA or a UK citizen. Every one of these was a
+    // flat "Residence Permit Card" until the distinctions arrived.
+    (
+        "POL",
+        "IB",
+        "Document Certifying Permanent Residence (UK Citizen)",
+    ),
+    ("POL", "IE", "Residence Card (EEA Family Member)"),
+    ("POL", "IF", "Residence Card (UK Family Member)"),
+    ("POL", "IK", "Permanent Residence Card (UK Family Member)"),
+    ("POL", "IO", "Foreigner ID Document"),
+    ("POL", "IR", "Residence Permit"),
+    ("POL", "IS", "Permanent Residence Card (EEA Family Member)"),
+    (
+        "POL",
+        "IW",
+        "Certificate of Registration of Stay (UK Citizen)",
+    ),
+    ("POL", "IZ", "Temporary Foreigner ID Certificate"),
     ("POL", "PC", "1951 Convention Travel Document"),
     ("POL", "PG", "1951 Convention Travel Document"),
+    ("POL", "PM", "Seaman's Book"),
     ("POL", "PP", "Travel Document for an Alien"),
+    ("POL", "PT", "Temporary Passport"),
+    ("ROU", "PE", "Passport"),
+    ("ROU", "PT", "Temporary Passport"),
     ("SVK", "PA", "1954 Convention Travel Document"),
     ("SVK", "PB", "1951 Convention Travel Document"),
     ("SVK", "PC", "Alien's Passport"),
+    ("SWE", "CR", "EU (Permanent) Residence Card"),
+    ("SWE", "PE", "Emergency Passport"),
+    ("SWE", "S<", "Seaman's Discharge Book"),
 ];
 
 /// A nationality or issuing state code as something readable, code included.
@@ -486,13 +549,19 @@ pub fn parse_mrz_document_code(document_code: &String, country_code: &String) ->
         "IP" => {
             return "Passport Card".to_string();
         }
+        "PD" => {
+            return "Diplomatic Passport".to_string();
+        }
+        "PS" => {
+            return "Service Passport".to_string();
+        }
         "PT" => {
             return "Travel Document".to_string();
         }
         "PR" => {
             return "1951 Convention Travel Document".to_string();
         }
-        "AD" | "AR" | "CR" | "IR" | "IT" | "RP" | "RT" => {
+        "AD" | "AR" | "AT" | "CR" | "IR" | "IT" | "RP" | "RT" => {
             return "Residence Permit Card".to_string();
         }
         "AI" | "CV" | "AC" => {
@@ -647,9 +716,9 @@ mod tests {
         assert_eq!(code("PS", "BEL"), "1954 Convention Travel Document");
         assert_eq!(code("PS", "ITA"), "Travel Document for Foreigners");
         assert_eq!(code("PS", "CHE"), "Passport for Foreigners");
-        // Nobody else has claimed PS, so it falls back to being a passport rather than
-        // to nothing at all.
-        assert_eq!(code("PS", "UTO"), "Passport");
+        // PS means a service passport wherever it has not been claimed, which is
+        // still a passport if the general rules ever have to guess.
+        assert_eq!(code("PS", "UTO"), "Service Passport");
 
         assert_eq!(code("PA", "ITA"), "1954 Convention Travel Document");
         assert_eq!(
@@ -658,6 +727,36 @@ mod tests {
         );
         assert_eq!(code("PU", "CZE"), "1951 Convention Travel Document");
         assert_eq!(code("PU", "NOR"), "Alien's Passport");
+    }
+
+    /// A state and a code can only mean one document.
+    ///
+    /// The lookup takes the first row it matches, so a second row for a pair it has
+    /// already seen is dead code that quietly disagrees with the live one. This caught
+    /// a real collision while the table was being filled in, which is the only reason
+    /// anyone would have noticed. Sortedness is only for whoever reads the file next,
+    /// but it is free to check while we are here.
+    #[test]
+    fn no_issuer_claims_the_same_code_twice() {
+        for pair in ISSUER_SPECIFIC_CODES.windows(2) {
+            let ((state, code, first), (next_state, next_code, second)) = (pair[0], pair[1]);
+            assert!(
+                (state, code) != (next_state, next_code),
+                "{}/{} is listed twice, as {:?} and {:?}",
+                state,
+                code,
+                first,
+                second
+            );
+            assert!(
+                (state, code) < (next_state, next_code),
+                "{}/{} is out of order, before {}/{}",
+                state,
+                code,
+                next_state,
+                next_code
+            );
+        }
     }
 
     /// Spain's is the one entry that does not begin with P, so it would reach none of
@@ -679,10 +778,12 @@ mod tests {
         assert_eq!(code("C<", "ITA"), "ID Card");
         assert_eq!(code("C<", "UTO"), "ID Card (likely)");
 
-        // Three states put residence permits on the same code as their ID cards.
+        // Two states put residence permits on the same code as their ID cards.
         assert_eq!(code("ID", "BEL"), "ID or Residence Permit Card");
         assert_eq!(code("ID", "DNK"), "ID or Residence Permit Card");
-        assert_eq!(code("ID", "POL"), "ID or Residence Permit Card");
+        // Poland's own residence codes say what each document is, so its ID is just
+        // an ID card and reaches the general rule like anyone else's.
+        assert_eq!(code("ID", "POL"), "ID Card");
         assert_eq!(code("ID", "ITA"), "ID Card");
     }
 
@@ -701,17 +802,17 @@ mod tests {
     #[test]
     fn polish_codes_use_the_country_not_the_currency() {
         assert_eq!(
-            parse_mrz_document_code(&"ID".to_string(), &"POL".to_string()),
-            "ID or Residence Permit Card"
+            parse_mrz_document_code(&"IO".to_string(), &"POL".to_string()),
+            "Foreigner ID Document"
         );
         assert_eq!(
             parse_mrz_document_code(&"IB".to_string(), &"POL".to_string()),
-            "Residence Permit Card"
+            "Document Certifying Permanent Residence (UK Citizen)"
         );
         // Elsewhere the same codes mean what they meant before.
         assert_eq!(
-            parse_mrz_document_code(&"ID".to_string(), &"UTO".to_string()),
-            "ID Card"
+            parse_mrz_document_code(&"IO".to_string(), &"UTO".to_string()),
+            "ID Card (likely)"
         );
         assert_eq!(
             parse_mrz_document_code(&"IB".to_string(), &"UTO".to_string()),
