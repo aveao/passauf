@@ -822,7 +822,7 @@ mod tests {
         // Deprecated in ISO 3166 and still printed on documents.
         assert_eq!(country("ANT"), "Netherlands Antilles (ANT)");
         // Not an issued code at all: a document claiming it is a sample.
-        assert_eq!(country("UTO"), "Utopia (specimen documents) (UTO)");
+        assert_eq!(country("UTO"), "Utopia (specimen) (UTO)");
     }
 
     /// The British codes are nationality classes, not countries.

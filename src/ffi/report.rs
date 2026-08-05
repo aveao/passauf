@@ -440,7 +440,7 @@ fn fill_from_mrz(document: &mut DocumentReport, mrz: &types::MRZ) {
 
     let (given_names, surname) = dg_helpers::format_mrz_name(name_of_holder);
 
-    document.mrz_format = Some(format.to_string());
+    document.mrz_format = Some(describe_mrz_format(format));
     document.mrz_raw = Some(raw.clone());
     // Passing false keeps the check off the log; it has already run once with
     // the CLI's warnings during parsing.
@@ -460,6 +460,25 @@ fn fill_from_mrz(document: &mut DocumentReport, mrz: &types::MRZ) {
     document.date_of_birth = iso_date_from_mrz(date_of_birth);
     document.date_of_expiry = iso_date_from_mrz(date_of_expiry);
     document.optional_data = Some(optional_data).filter(|text| !text.is_empty());
+}
+
+/// The layout's name, with the kind of document it is usually printed on.
+///
+/// TD1 is three rows of thirty on an ID-1 card (9303 Part 5); TD3 is two rows of
+/// forty-four in a passport book (Part 4). Those names say nothing at all to
+/// anyone who has not read the standard, while the shape of the thing in the
+/// reader's hand is something they can check at a glance.
+///
+/// Approximate on purpose, hence the tilde. TD1 is the size of most residence
+/// permits and a good many driving licences as well as ID cards, and a handful
+/// of states issue a passport card. The layout is a fact; what it was printed on
+/// is a good guess.
+fn describe_mrz_format(format: &str) -> String {
+    return match format {
+        "TD1" => "TD1 (~ID Card)".to_string(),
+        "TD3" => "TD3 (~Passport)".to_string(),
+        other => other.to_string(),
+    };
 }
 
 /// The holder's name as DG11 records it, given names first.
@@ -970,13 +989,27 @@ mod tests {
         assert_eq!(document.date_of_birth, Some("1974-08-12".to_string()));
         assert_eq!(document.date_of_expiry, Some("2012-04-15".to_string()));
         assert_eq!(document.sex, Some("Female".to_string()));
-        assert_eq!(document.mrz_format, Some("TD3".to_string()));
+        assert_eq!(document.mrz_format, Some("TD3 (~Passport)".to_string()));
         // Utopia is 9303's own specimen state, and saying so is the point: a
         // document claiming it is a sample rather than anybody's passport.
         assert_eq!(
             document.issuing_state,
-            Some("Utopia (specimen documents) (UTO)".to_string())
+            Some("Utopia (specimen) (UTO)".to_string())
         );
+    }
+
+    /// TD1 is the card and TD3 is the book, and it is easy to say it backwards.
+    ///
+    /// Three rows of thirty fit an ID-1 card (9303 Part 5); two rows of
+    /// forty-four fit a passport page (Part 4). The numbers give no hint which
+    /// way round that goes, so the one thing this row is for is the one thing
+    /// worth pinning down.
+    #[test]
+    fn says_which_layout_goes_on_which_document() {
+        assert_eq!(describe_mrz_format("TD1"), "TD1 (~ID Card)");
+        assert_eq!(describe_mrz_format("TD3"), "TD3 (~Passport)");
+        // A layout passauf does not parse yet must not acquire a guess.
+        assert_eq!(describe_mrz_format("TD2"), "TD2");
     }
 
     /// Germany's code is one letter, and the whole path has to survive it.

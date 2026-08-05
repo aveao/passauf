@@ -80,7 +80,7 @@ ICAO = [
     ("NTZ", "Neutral Zone"),
     # Part G — specimen documents. Not an issued code, and worth naming for
     # exactly that reason: a document claiming Utopia is a sample.
-    ("UTO", "Utopia (specimen documents)"),
+    ("UTO", "Utopia (specimen)"),
     # Part H — used by ICAO when signing a master list.
     ("IAO", "International Civil Aviation Organization (ICAO)"),
 ]
@@ -88,10 +88,20 @@ ICAO = [
 # Where this app's wording departs from the name in ISO 3166.
 #
 # ISO tracks what a state asks to be called, which is the right rule for a
-# registry and not always the name the language has. These are shown the way
+# registry and not always the name the language has. It also inverts names so
+# that they sort — "Korea, Republic of" — which is right for a list and wrong
+# for a row on a phone that somebody is reading once. These are shown the way
 # English usually writes them.
 NAMES = {
     "TUR": "Turkey",
+    "TWN": "Taiwan",
+    "IRN": "Iran",
+    "KOR": "South Korea",
+    "PRK": "North Korea",
+    # Two neighbouring states whose ISO names differ only by a clause, which is
+    # the one case where the short form is clearer *and* less ambiguous.
+    "COD": "DR Congo",
+    "COG": "Congo-Brazzaville",
 }
 
 
