@@ -12,6 +12,9 @@ use crate::types;
 
 /// The most plaintext one READ BINARY may ask for and still get an answer back.
 ///
+/// Only ever used against a known remaining length, never as an opening guess: asking
+/// for more than a file holds is answered with 0x6282 or 0x6C rather than the data.
+///
 /// Secure messaging does not return the bytes on their own. They come wrapped: encrypted
 /// and padded into a DO87, then a DO99 holding the status word and a DO8E holding the
 /// MAC. The outer Le on a secured command is always 256, so all of that has to fit in
@@ -360,10 +363,20 @@ pub fn select_and_read_file(
 
     info!("<d>Reading {} ({})</>", dg_info.name, dg_info.description);
     let mut total_data: Vec<u8> = vec![];
-    // Ask for as much as will come back, from the first exchange onwards. The first one
-    // used to fetch five bytes purely to read the ASN.1 length out of them, which cost a
-    // whole round trip per file to learn a number and carry almost no data with it.
-    let mut bytes_to_read = MAX_SECURE_READ;
+    // Just enough to read the ASN.1 header out of, and no more.
+    //
+    // ICAO 9303 gives no way to ask how long a file is, so the length has to be read out
+    // of the file itself, and until it is known there is no way to tell how much is safe
+    // to ask for. Asking for a full read up front looks like it would save a round trip
+    // per file, and does the opposite: most of these files are a few dozen bytes, so the
+    // request runs off the end and the document answers 0x6282 or 0x6C rather than 0x90.
+    // Neither carries the header where this expects it, and every file fails at its
+    // first exchange.
+    //
+    // Once the length is known, the reads below take as much as remains, up to
+    // MAX_SECURE_READ. Those can never overrun, which is what makes them safe to enlarge
+    // and this one not.
+    let mut bytes_to_read = 0x05;
     let mut file_len: u16 = 0;
     while bytes_to_read > 0 {
         let mut apdu = apdu_read_binary(total_data.len() as u16, bytes_to_read);
