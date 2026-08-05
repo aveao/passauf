@@ -173,12 +173,14 @@ pub struct DocumentReport {
     /// Given names, space separated.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub given_names: Option<String>,
-    /// The holder's name as DG11 spells it out, when the document carries one.
+    /// The holder's name as DG11 spells it out, when the document carries one,
+    /// with anything in its other-names group in brackets after it.
     ///
     /// From DG11 rather than the MRZ because the MRZ is the abbreviated copy:
     /// it truncates a name that does not fit its rows and has no way to write
     /// anything outside its own character set. DG11 is where the issuer put the
-    /// name in full, so it is the one to show someone.
+    /// name in full, so it is the one to show someone. See [`dg11_display_name`]
+    /// for why the other names come along.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub full_name: Option<String>,
     /// "Male", "Female" or "X (or unspecified)".
@@ -369,7 +371,7 @@ fn document(read: &DocumentRead) -> DocumentReport {
     if let Some(ParsedDataGroup::EFDG11(dg11)) =
         read.file("EF.DG11").and_then(|file| file.parsed.as_ref())
     {
-        document.full_name = dg11_full_name(dg11);
+        document.full_name = dg11_display_name(dg11);
         document.personal_details = personal_details(dg11);
     }
 
@@ -475,6 +477,30 @@ fn dg11_full_name(dg11: &types::EFDG11) -> Option<String> {
                 .to_string()
         })
         .filter(|name| !name.is_empty());
+}
+
+/// The name to head the result with, other names in brackets after it.
+///
+/// 9303 puts the family name first in 5F0E and separates it with `<<`. Issuers
+/// deviate in two ways that cannot be undone from the file: some write the two
+/// halves with a plain space, which destroys which half is which, and some file
+/// the family name in the other-names group rather than in 5F0E at all — that
+/// group is meant for a name the holder is also known by, such as one carried
+/// before marriage.
+///
+/// Since neither can be told apart from the outside, both parts are shown and
+/// neither is labelled: `GENOVEVA (BAUER)` reads correctly whether the brackets
+/// hold the family name or a former one. What it never does is leave a name the
+/// document recorded off the screen, which is what happens if only 5F0E is
+/// trusted.
+fn dg11_display_name(dg11: &types::EFDG11) -> Option<String> {
+    let name = dg11_full_name(dg11)?;
+    return Some(
+        match dg11.other_names.as_ref().filter(|names| !names.is_empty()) {
+            Some(others) => format!("{} ({})", name, others.join(", ")),
+            None => name,
+        },
+    );
 }
 
 fn personal_details(dg11: &types::EFDG11) -> Vec<Detail> {
@@ -945,6 +971,65 @@ mod tests {
         assert_eq!(document.date_of_expiry, Some("2012-04-15".to_string()));
         assert_eq!(document.sex, Some("Female".to_string()));
         assert_eq!(document.mrz_format, Some("TD3".to_string()));
+    }
+
+    /// A DG11 carrying nothing but the two name fields.
+    fn named(full_name: &str, other_names: Option<Vec<String>>) -> types::EFDG11 {
+        return types::EFDG11 {
+            full_name: Some(full_name.to_string()),
+            other_names,
+            personal_number: None,
+            full_date_of_birth: None,
+            place_of_birth: None,
+            permanent_address: None,
+            telephone: None,
+            profession: None,
+            title: None,
+            personal_summary: None,
+            proof_of_citizenship: None,
+            other_valid_td_numbers: None,
+            custody_information: None,
+        };
+    }
+
+    /// The other-names group belongs on the heading with the name.
+    ///
+    /// Some issuers file the family name there rather than in 5F0E, and from
+    /// outside the document that is indistinguishable from a name the holder is
+    /// also known by. Bracketing it reads correctly either way; leaving it off
+    /// drops a family name for the issuers that do the first thing.
+    #[test]
+    fn heads_the_result_with_every_name_the_document_gave() {
+        assert_eq!(
+            dg11_display_name(&named("MUSTERMANN<<ERIKA", None)),
+            Some("ERIKA MUSTERMANN".to_string())
+        );
+        // The family name filed in the other-names group.
+        assert_eq!(
+            dg11_display_name(&named("GENOVEVA", Some(vec!["BAUER".to_string()]))),
+            Some("GENOVEVA (BAUER)".to_string())
+        );
+        // And the same shape when the group means what 9303 says it means.
+        assert_eq!(
+            dg11_display_name(&named(
+                "MUSTERMANN<<ERIKA",
+                Some(vec!["SCHMIDT".to_string(), "VON HOFFMANN".to_string()]),
+            )),
+            Some("ERIKA MUSTERMANN (SCHMIDT, VON HOFFMANN)".to_string())
+        );
+        // An empty group must not leave an empty pair of brackets behind.
+        assert_eq!(
+            dg11_display_name(&named("MUSTERMANN<<ERIKA", Some(vec![]))),
+            Some("ERIKA MUSTERMANN".to_string())
+        );
+
+        // The details card keeps them apart, since it has a row for each.
+        let dg11 = named("GENOVEVA", Some(vec!["BAUER".to_string()]));
+        let details = personal_details(&dg11);
+        assert_eq!(details[0].label, "Full name");
+        assert_eq!(details[0].value, "GENOVEVA");
+        assert_eq!(details[1].label, "Other names");
+        assert_eq!(details[1].value, "BAUER");
     }
 
     /// EF.DG1 shows the zone and what was read out of it, side by side.

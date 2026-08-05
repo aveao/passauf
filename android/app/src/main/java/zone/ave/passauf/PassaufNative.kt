@@ -310,7 +310,14 @@ data class DocumentDetails(
     val nationality: String? = null,
     val surname: String? = null,
     val givenNames: String? = null,
-    /** The holder's name as EF.DG11 spells it out, when the document carries one. */
+    /**
+     * The holder's name as EF.DG11 spells it out, when the document carries one,
+     * with anything in its other-names group in brackets after it.
+     *
+     * The brackets are not decoration: some issuers file the family name in that
+     * group rather than in the name field, and nothing in the document says which
+     * of the two they meant, so neither part is labelled and neither is left out.
+     */
     val fullName: String? = null,
     val sex: String? = null,
     /** YYYY-MM-DD */
