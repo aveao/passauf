@@ -14,10 +14,16 @@ impl types::TD1Mrz {
             "Document Type",
             &dg_helpers::parse_mrz_document_code(&self.document_code, &self.issuing_state),
         );
-        dg_helpers::print_string_element("Issuing State", &self.issuing_state);
+        dg_helpers::print_string_element(
+            "Issuing State",
+            &dg_helpers::format_country_code(&self.issuing_state),
+        );
         dg_helpers::print_string_element_as_name("Name of Holder", &self.name_of_holder);
         dg_helpers::print_string_element("Document Number", &self.document_number);
-        dg_helpers::print_string_element("Nationality", &self.nationality);
+        dg_helpers::print_string_element(
+            "Nationality",
+            &dg_helpers::format_country_code(&self.nationality),
+        );
         dg_helpers::print_string_element_as_mrz_date("Date of Birth", &self.date_of_birth);
         dg_helpers::print_string_element("Legal Sex Marker", &dg_helpers::parse_mrz_sex(self.sex));
         dg_helpers::print_string_element_as_mrz_date("Date of Expiry", &self.date_of_expiry);
@@ -51,10 +57,16 @@ impl types::TD3Mrz {
             "Document Type",
             &dg_helpers::parse_mrz_document_code(&self.document_code, &self.issuing_state),
         );
-        dg_helpers::print_string_element("Issuing State", &self.issuing_state);
+        dg_helpers::print_string_element(
+            "Issuing State",
+            &dg_helpers::format_country_code(&self.issuing_state),
+        );
         dg_helpers::print_string_element_as_name("Name of Holder", &self.name_of_holder);
         dg_helpers::print_string_element("Document Number", &self.document_number);
-        dg_helpers::print_string_element("Nationality", &self.nationality);
+        dg_helpers::print_string_element(
+            "Nationality",
+            &dg_helpers::format_country_code(&self.nationality),
+        );
         dg_helpers::print_string_element_as_mrz_date("Date of Birth", &self.date_of_birth);
         dg_helpers::print_string_element("Legal Sex Marker", &dg_helpers::parse_mrz_sex(self.sex));
         dg_helpers::print_string_element_as_mrz_date("Date of Expiry", &self.date_of_expiry);

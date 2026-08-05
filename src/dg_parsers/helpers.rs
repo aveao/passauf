@@ -423,6 +423,24 @@ const ISSUER_SPECIFIC_CODES: &[(&str, &str, &str)] = &[
     ("SVK", "PC", "Alien's Passport"),
 ];
 
+/// A nationality or issuing state code as something readable, code included.
+///
+/// Both parts, always. The name is what the field means and three letters are
+/// not, but the code is what the document actually says, and it is the form
+/// every other system and every standard refers to — so dropping it would make
+/// the screen harder to check the document against, not easier. The same
+/// reasoning the protocol identifiers get.
+///
+/// A code nothing defines is returned alone. Issuers do print codes that no
+/// standard lists, and inventing a name for one would be worse than three
+/// letters that can be looked up.
+pub fn format_country_code(code: &String) -> String {
+    return match types::describe_country_code(code) {
+        Some(name) => format!("{} ({})", name, code),
+        None => code.to_string(),
+    };
+}
+
 pub fn parse_mrz_document_code(document_code: &String, country_code: &String) -> String {
     // https://wf.lavatech.top/aves-tech-notes/emrtd-data-quirks see document type codes
     if document_code.len() != 2 {
@@ -784,5 +802,82 @@ mod tests {
         // Feature points that run past the end.
         let overrun = face_record(JP2, 0x01, 622, 0xFFFF);
         assert_eq!(parse_iso_19794_5(&overrun[..60]), None);
+    }
+
+    fn country(code: &str) -> String {
+        return format_country_code(&code.to_string());
+    }
+
+    /// The codes that are not ISO 3166, which is the whole reason for the table.
+    ///
+    /// Germany's is a single letter, and arrives as one because the MRZ's filler
+    /// is stripped before anything sees it. A lookup that assumes three
+    /// characters misses the country next door.
+    #[test]
+    fn names_the_codes_iso_3166_does_not_have() {
+        assert_eq!(country("D"), "Germany (D)");
+        assert_eq!(country("DEU"), "Germany (DEU)");
+        assert_eq!(country("RKS"), "Kosovo (RKS)");
+        assert_eq!(country("EUE"), "European Union (EUE)");
+        // Deprecated in ISO 3166 and still printed on documents.
+        assert_eq!(country("ANT"), "Netherlands Antilles (ANT)");
+        // Not an issued code at all: a document claiming it is a sample.
+        assert_eq!(country("UTO"), "Utopia (specimen documents) (UTO)");
+    }
+
+    /// The British codes are nationality classes, not countries.
+    ///
+    /// Calling any of them "United Kingdom" would be inventing a status the
+    /// document does not claim, and the difference is the holder's right to
+    /// live there.
+    #[test]
+    fn does_not_flatten_the_british_codes_into_one_country() {
+        assert_eq!(country("GBR"), "United Kingdom (GBR)");
+        assert_eq!(country("GBN"), "British National (Overseas) (GBN)");
+        assert_eq!(country("GBD"), "British Overseas Territories Citizen (GBD)");
+        assert_eq!(country("GBO"), "British Overseas Citizen (GBO)");
+        assert_eq!(country("GBP"), "British Protected Person (GBP)");
+        assert_eq!(country("GBS"), "British Subject (GBS)");
+    }
+
+    /// Nationality is not always a nationality.
+    ///
+    /// These four say the holder has none to state, and they are the codes where
+    /// three letters hide the most: nobody reads XXB as "refugee" unprompted.
+    #[test]
+    fn says_what_the_codes_for_no_nationality_mean() {
+        assert_eq!(country("XXA"), "Stateless person (1954 Convention) (XXA)");
+        assert_eq!(country("XXB"), "Refugee (1951 Convention) (XXB)");
+        assert_eq!(country("XXC"), "Refugee, other than under XXB (XXC)");
+        assert_eq!(country("XXX"), "Unspecified nationality (XXX)");
+    }
+
+    /// A code no standard defines still has to reach the screen.
+    #[test]
+    fn leaves_an_unknown_code_alone() {
+        assert_eq!(country("ZZZ"), "ZZZ");
+        assert_eq!(country(""), "");
+        // Lowercase is not a code. An MRZ is upper case by construction, so this
+        // would mean something upstream mangled it, and guessing would hide that.
+        assert_eq!(country("tur"), "tur");
+    }
+
+    /// The table is searched by halving it, so the generator must sort it and
+    /// must not emit the same code twice.
+    #[test]
+    fn the_generated_table_is_ordered_and_unique() {
+        for pair in types::COUNTRY_CODES.windows(2) {
+            assert!(
+                pair[0].0 < pair[1].0,
+                "{} is not before {} in the table",
+                pair[0].0,
+                pair[1].0
+            );
+        }
+        // And every entry is reachable through the search, which is the property
+        // the ordering is for.
+        for (code, name) in types::COUNTRY_CODES.iter() {
+            assert_eq!(types::describe_country_code(code), Some(*name));
+        }
     }
 }

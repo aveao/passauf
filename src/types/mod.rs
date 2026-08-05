@@ -1,3 +1,4 @@
+pub mod country_codes;
 pub mod data_groups;
 #[cfg(feature = "pace")]
 pub mod ef_cardaccess;
@@ -5,6 +6,7 @@ pub mod errors;
 pub mod mrz;
 pub mod parsed_data_groups;
 
+pub use self::country_codes::*;
 pub use self::data_groups::*;
 #[cfg(feature = "pace")]
 pub use self::ef_cardaccess::*;

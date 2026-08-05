@@ -452,8 +452,8 @@ fn fill_from_mrz(document: &mut DocumentReport, mrz: &types::MRZ) {
         issuing_state,
     ));
     document.document_number = Some(document_number.clone());
-    document.issuing_state = Some(issuing_state.clone());
-    document.nationality = Some(nationality.clone());
+    document.issuing_state = Some(dg_helpers::format_country_code(issuing_state));
+    document.nationality = Some(dg_helpers::format_country_code(nationality));
     document.surname = Some(surname.trim().to_string());
     document.given_names = Some(given_names.trim().to_string());
     document.sex = Some(dg_helpers::parse_mrz_sex(sex));
@@ -971,6 +971,34 @@ mod tests {
         assert_eq!(document.date_of_expiry, Some("2012-04-15".to_string()));
         assert_eq!(document.sex, Some("Female".to_string()));
         assert_eq!(document.mrz_format, Some("TD3".to_string()));
+        // Utopia is 9303's own specimen state, and saying so is the point: a
+        // document claiming it is a sample rather than anybody's passport.
+        assert_eq!(
+            document.issuing_state,
+            Some("Utopia (specimen documents) (UTO)".to_string())
+        );
+    }
+
+    /// Germany's code is one letter, and the whole path has to survive it.
+    ///
+    /// The MRZ prints `D<<` and the filler comes off before anything else sees
+    /// it, so the code that reaches the table is `D` and not `DEU`. Every other
+    /// state in the world is three characters, which is exactly how a lookup
+    /// that assumes three characters gets written and never noticed.
+    #[test]
+    fn names_the_state_whose_code_is_one_letter() {
+        let mut document = DocumentReport::default();
+        let mrz = types::MRZ::deserialize(
+            &"P<D<<MUSTERMANN<<ERIKA<<<<<<<<<<<<<<<<<<<<<<\
+              C01X00T478D<<6408125F2702283<<<<<<<<<<<<<<04"
+                .to_string(),
+        )
+        .unwrap();
+        fill_from_mrz(&mut document, &mrz);
+
+        assert_eq!(document.issuing_state, Some("Germany (D)".to_string()));
+        assert_eq!(document.nationality, Some("Germany (D)".to_string()));
+        assert_eq!(document.mrz_checksums_valid, Some(true));
     }
 
     /// A DG11 carrying nothing but the two name fields.
