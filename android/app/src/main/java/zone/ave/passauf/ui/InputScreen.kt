@@ -210,7 +210,12 @@ private fun CanField(form: AccessForm, onChange: ((AccessForm) -> AccessForm) ->
             onChange { it.copy(cardAccessNumber = value.filter { char -> char.isDigit() }) }
         },
         label = { Text("Card Access Number") },
-        supportingText = { Text("Usually six digits, printed on the front") },
+        supportingText = {
+            Text(
+                "Usually six digits. On the identity page, on the back of a card, or " +
+                    "sometimes on the page after."
+            )
+        },
         singleLine = true,
         keyboardOptions = KeyboardOptions(
             keyboardType = KeyboardType.NumberPassword,

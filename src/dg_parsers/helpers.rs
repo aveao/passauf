@@ -362,7 +362,10 @@ pub fn parse_mrz_sex(sex: char) -> String {
     return match sex {
         'M' => "Male".to_string(),
         'F' => "Female".to_string(),
-        '<' => "X".to_string(),
+        // ICAO gives the filler for "unspecified", and issuers that print a marker for
+        // it print X. The two are not distinguishable here and do not always mean the
+        // same thing, so neither reading is asserted over the other.
+        'X' | '<' => "X (or unspecified)".to_string(),
         _ => sex.to_string(),
     };
 }
@@ -555,6 +558,16 @@ mod tests {
             parse_mrz_document_code(&"PT".to_string(), &"UTO".to_string()),
             "Passport"
         );
+    }
+
+    /// A marker of X and an unfilled field arrive as different characters and mean
+    /// different things, but neither can be told apart from the other here.
+    #[test]
+    fn an_unfilled_sex_field_reads_the_same_as_an_x() {
+        assert_eq!(parse_mrz_sex('M'), "Male");
+        assert_eq!(parse_mrz_sex('F'), "Female");
+        assert_eq!(parse_mrz_sex('<'), "X (or unspecified)");
+        assert_eq!(parse_mrz_sex('X'), "X (or unspecified)");
     }
 
     /// Poland is POL. PLN is the currency, and while it was in here these two branches

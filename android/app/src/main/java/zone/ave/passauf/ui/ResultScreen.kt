@@ -203,7 +203,11 @@ fun ResultScreen(
 
         item { LogCard(report.log) }
 
-        item { StorageCard(filesOnDisk, dumped.size, onDiscardFiles) }
+        // A read that wrote nothing has nothing to report here. The card still appears
+        // once files have been deleted, because that is worth confirming.
+        if (!filesOnDisk || dumped.isNotEmpty()) {
+            item { StorageCard(filesOnDisk, dumped.size, onDiscardFiles) }
+        }
 
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -343,7 +347,7 @@ private fun IdentityCard(
             DetailRow("Issuing state", document.issuingState)
             DetailRow("Date of birth", formatDate(document.dateOfBirth))
             DetailRow("Date of expiry", formatDate(document.dateOfExpiry))
-            DetailRow("Sex", document.sex)
+            DetailRow("Legal sex", document.sex)
             DetailRow("Optional data", document.optionalData)
             DetailRow("MRZ format", document.mrzFormat)
             document.mrzChecksumsValid?.let { valid ->

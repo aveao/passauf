@@ -166,7 +166,7 @@ pub struct DocumentReport {
     /// Given names, space separated.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub given_names: Option<String>,
-    /// "Male", "Female" or "X".
+    /// "Male", "Female" or "X (or unspecified)".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sex: Option<String>,
     /// YYYY-MM-DD, so the app can format it for the reader's locale.
