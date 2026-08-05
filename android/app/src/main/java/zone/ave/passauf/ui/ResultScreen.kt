@@ -179,12 +179,6 @@ fun ResultScreen(
             item { IdentityCard(document, report.portraits, report) }
         }
 
-        // How the document was read and what that establishes, before the
-        // details it contained: it is the part a reader has to weigh.
-        if (report.ok) {
-            item { ValidationCard(report) }
-        }
-
         report.document?.let { document ->
             if (document.personalDetails.isNotEmpty()) {
                 item { DetailsCard("Additional personal details", document.personalDetails) }
@@ -196,6 +190,14 @@ fun ResultScreen(
 
         if (report.warnings.isNotEmpty()) {
             item { WarningsCard(report.warnings) }
+        }
+
+        // Last thing before the files, because it is what the files add up to: each one
+        // carries its own hash result, and this says what all of them together do and
+        // do not establish. The summary at the top of the identity card covers the same
+        // ground in two lines for anyone not scrolling this far.
+        if (report.ok) {
+            item { ValidationCard(report) }
         }
 
         if (report.files.isNotEmpty()) {
