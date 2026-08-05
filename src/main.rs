@@ -11,8 +11,18 @@ use passauf::types::MRZ;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct CliArgs {
-    /// Dump files? (path can be optionally supplied, defaults to current directory)
-    #[arg(long = "dump", value_name = "PATH", default_missing_value = ".", value_parser = clap::value_parser!(PathBuf), num_args = 0..=1)]
+    /// Write the document's files out (path optional, defaults to the current directory)
+    ///
+    /// Was --dump, which is kept working but no longer advertised: "dumping a passport"
+    /// describes the same act rather less kindly than it deserves.
+    #[arg(
+        long = "export",
+        alias = "dump",
+        value_name = "PATH",
+        default_missing_value = ".",
+        value_parser = clap::value_parser!(PathBuf),
+        num_args = 0..=1
+    )]
     dump_path: Option<PathBuf>,
 
     /// Path of the reader to use.
@@ -184,7 +194,7 @@ fn main() {
     let options = ReadOptions {
         file_prefix: session::file_prefix_for(&access_key),
         access_key,
-        // Without --dump the large files aren't worth the wait, since there is
+        // Without --export the large files aren't worth the wait, since there is
         // nowhere for their contents to go.
         read_binary_files: args.dump_path.is_some(),
         dump_path: args.dump_path.clone(),

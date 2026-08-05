@@ -28,7 +28,11 @@ class WireFormatTest {
         )
 
         assertContains(json, "\"readBinaryFiles\":true")
-        assertContains(json, "\"logLevel\":\"debug\"")
+        // info, not debug. At debug the read records the contents of every file, and
+        // the app will offer that log to a file picker; it defaulted to debug once, and
+        // this is here so it cannot drift back without saying so.
+        assertContains(json, "\"logLevel\":\"info\"")
+        assertFalse(json.contains("\"logLevel\":\"debug\""), json)
         // Nulls are the exception: Rust has its own default for an absent
         // dumpPath, and sending null would mean the same thing more loudly.
         assertFalse(json.contains("dumpPath"), json)

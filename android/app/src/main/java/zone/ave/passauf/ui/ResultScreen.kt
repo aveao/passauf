@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.automirrored.filled.Help
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AssistChip
@@ -40,6 +41,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import zone.ave.passauf.Exporting
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -64,7 +71,6 @@ import zone.ave.passauf.DocumentReport
 import zone.ave.passauf.FileReport
 import zone.ave.passauf.KeyKind
 import zone.ave.passauf.PassaufNative
-import zone.ave.passauf.Sharing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -89,6 +95,59 @@ fun ResultScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    // What to write once the user has named a file. The system picker is a round trip,
+    // so the payload has to wait somewhere in the meantime.
+    var pending by remember { mutableStateOf<PendingExport?>(null) }
+    var asking by remember { mutableStateOf<PendingExport?>(null) }
+
+    val saver = rememberLauncherForActivityResult(
+        // One mime type for every kind of export here; the name carries the extension,
+        // and asking for a tree instead would hand over a whole directory.
+        ActivityResultContracts.CreateDocument("*/*")
+    ) { target ->
+        val job = pending
+        pending = null
+        if (target == null || job == null) {
+            return@rememberLauncherForActivityResult
+        }
+        // A read with images in it is megabytes, and this is the main thread.
+        scope.launch(Dispatchers.IO) {
+            try {
+                when (job) {
+                    is PendingExport.Everything -> Exporting.zipInto(context, target, job.files)
+                    is PendingExport.Log -> Exporting.textInto(context, target, job.text)
+                    is PendingExport.One -> Exporting.fileInto(context, target, job.file)
+                }
+            } catch (error: Exception) {
+                Log.e("passauf", "Could not write the export.", error)
+            }
+        }
+    }
+
+    // Every export goes through here, so the warning cannot be routed around.
+    val export: (PendingExport) -> Unit = { job ->
+        if (oweExportWarning(context)) {
+            asking = job
+        } else {
+            pending = job
+            saver.launch(job.name)
+        }
+    }
+
+    asking?.let { job ->
+        ExportWarning(
+            onConfirm = {
+                asking = null
+                rememberExportWarningShown(context)
+                pending = job
+                saver.launch(job.name)
+            },
+            onDismiss = { asking = null },
+        )
+    }
+
     val dumped = remember(report, filesOnDisk) {
         if (!filesOnDisk) {
             emptyList()
@@ -138,7 +197,7 @@ fun ResultScreen(
                 )
             }
             items(report.files.filter { it.present }, key = { it.name }) { file ->
-                FileCard(file, filesOnDisk)
+                FileCard(file, filesOnDisk, export)
             }
         }
 
@@ -150,19 +209,33 @@ fun ResultScreen(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (dumped.isNotEmpty()) {
                     Button(
-                        onClick = { Sharing.shareAll(context, dumped) },
+                        onClick = {
+                            export(
+                                PendingExport.Everything(
+                                    Exporting.exportName(report.document?.documentNumber, LocalDate.now()),
+                                    dumped,
+                                )
+                            )
+                        },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Icon(Icons.Default.Share, contentDescription = null)
+                        Icon(Icons.Default.Save, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
-                        Text("Export ${dumped.size} files")
+                        Text("Save ${dumped.size} files")
                     }
                 }
                 if (report.log.isNotEmpty() && filesOnDisk) {
                     OutlinedButton(
-                        onClick = { Sharing.shareLog(context, directory, report.log) },
+                        onClick = {
+                            export(
+                                PendingExport.Log(
+                                    Exporting.logName(LocalDate.now()),
+                                    report.log.joinToString("\n"),
+                                )
+                            )
+                        },
                         modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Export the log") }
+                    ) { Text("Save the log") }
                     if (detailedLog) {
                         // The ordinary log says what happened. This one says what was
                         // read, file by file, and someone exports a log precisely when
@@ -555,7 +628,11 @@ private fun DetailsCard(title: String, details: List<Detail>) {
 }
 
 @Composable
-private fun FileCard(file: FileReport, filesOnDisk: Boolean) {
+private fun FileCard(
+    file: FileReport,
+    filesOnDisk: Boolean,
+    onExport: (PendingExport) -> Unit,
+) {
     val context = LocalContext.current
     val expanded = remember { mutableStateMapOf<String, Boolean>() }
     val isOpen = expanded[file.name] == true
@@ -610,7 +687,7 @@ private fun FileCard(file: FileReport, filesOnDisk: Boolean) {
             }
             if (images.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
-                ImageStrip(images)
+                ImageStrip(images, onExport)
             }
 
             if (file.details.isNotEmpty()) {
@@ -624,7 +701,7 @@ private fun FileCard(file: FileReport, filesOnDisk: Boolean) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { Sharing.shareFile(context, saved) }
+                            .clickable { onExport(PendingExport.One(saved.name, saved)) }
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -644,7 +721,7 @@ private fun FileCard(file: FileReport, filesOnDisk: Boolean) {
  * Tapping one shares it, the same as tapping its filename below.
  */
 @Composable
-private fun ImageStrip(files: List<File>) {
+private fun ImageStrip(files: List<File>, onExport: (PendingExport) -> Unit) {
     val context = LocalContext.current
     val bitmaps = decodedImages(files)
 
@@ -676,7 +753,9 @@ private fun ImageStrip(files: List<File>) {
                     .clip(RoundedCornerShape(8.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant)
                     .clickable {
-                        files.getOrNull(index)?.let { Sharing.shareFile(context, it) }
+                        files.getOrNull(index)?.let {
+                            onExport(PendingExport.One(it.name, it))
+                        }
                     },
             )
         }
@@ -834,4 +913,19 @@ private fun formatDate(isoDate: String?): String? {
         return null
     }
     return runCatching { LocalDate.parse(isoDate).format(LOCAL_DATE) }.getOrDefault(isoDate)
+}
+
+/**
+ * Something waiting for the user to say where it goes.
+ *
+ * The name travels with the payload because the system picker needs it up front, and
+ * because a name like passauf-export-L898-2026-08-05-NEVER-SHARE.zip is doing as much
+ * work as anything else here.
+ */
+private sealed interface PendingExport {
+    val name: String
+
+    data class Everything(override val name: String, val files: List<File>) : PendingExport
+    data class Log(override val name: String, val text: String) : PendingExport
+    data class One(override val name: String, val file: File) : PendingExport
 }
