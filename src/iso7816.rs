@@ -10,6 +10,24 @@ use crate::secure_messaging::{padding_method_2_unpad, SecureMessaging};
 use crate::smartcard_abstractions::Smartcard;
 use crate::types;
 
+/// The most plaintext one READ BINARY may ask for and still get an answer back.
+///
+/// Secure messaging does not return the bytes on their own. They come wrapped: encrypted
+/// and padded into a DO87, then a DO99 holding the status word and a DO8E holding the
+/// MAC. The outer Le on a secured command is always 256, so all of that has to fit in
+/// 256 bytes, and the plaintext underneath has to be small enough to leave room.
+///
+/// Working backwards from 256 through padding method 2, the DO87 length field, and the
+/// fourteen bytes DO99 and DO8E take between them:
+///
+/// - 3DES, eight byte blocks: 231 fits, 232 does not.
+/// - AES, sixteen byte blocks: 223 fits, 224 does not.
+///
+/// AES decides it, because its larger blocks jump from 224 to 240 in one step. Session
+/// keys are established before any file is read and either cipher may be in use, so this
+/// is the value that holds for both.
+const MAX_SECURE_READ: u16 = 0xDF;
+
 #[repr(u8)]
 pub enum Command {
     ReadBinary = 0xB0,
@@ -342,7 +360,10 @@ pub fn select_and_read_file(
 
     info!("<d>Reading {} ({})</>", dg_info.name, dg_info.description);
     let mut total_data: Vec<u8> = vec![];
-    let mut bytes_to_read = 0x05;
+    // Ask for as much as will come back, from the first exchange onwards. The first one
+    // used to fetch five bytes purely to read the ASN.1 length out of them, which cost a
+    // whole round trip per file to learn a number and carry almost no data with it.
+    let mut bytes_to_read = MAX_SECURE_READ;
     let mut file_len: u16 = 0;
     while bytes_to_read > 0 {
         let mut apdu = apdu_read_binary(total_data.len() as u16, bytes_to_read);
@@ -384,7 +405,10 @@ pub fn select_and_read_file(
         } else if (((total_data.len() + apdu_data.len()) as u16) < file_len)
             && (status_code_bytes[0] == 0x90)
         {
-            bytes_to_read = min(0x80, file_len - (total_data.len() + apdu_data.len()) as u16);
+            bytes_to_read = min(
+                MAX_SECURE_READ,
+                file_len - (total_data.len() + apdu_data.len()) as u16,
+            );
         } else {
             bytes_to_read = 0;
             // if the read failed at some point, return None
