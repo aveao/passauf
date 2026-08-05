@@ -545,13 +545,11 @@ fn details(parsed: &ParsedDataGroup) -> Vec<Detail> {
             }
         }
         ParsedDataGroup::EFDG1(dg1) => {
-            // DG1's contents are the MRZ, which the document block already
-            // covers field by field. The raw zone is still worth showing.
-            let raw = match &dg1.mrz {
-                types::MRZ::TD1(td1) => &td1.raw_mrz,
-                types::MRZ::TD3(td3) => &td3.raw_mrz,
-            };
-            details.push(Detail::new("MRZ", raw.clone()));
+            // DG1's contents are the MRZ, which the document block already covers
+            // field by field. The zone itself is still worth showing, laid out in the
+            // rows it is printed as rather than as one run of characters, so it can be
+            // read against the document.
+            details.push(Detail::new("MRZ", dg1.mrz.rows().join("\n")));
         }
         ParsedDataGroup::EFDG2_3_4(biometrics) => {
             for (index, biometric) in biometrics.biometrics.iter().enumerate() {

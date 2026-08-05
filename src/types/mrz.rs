@@ -255,6 +255,25 @@ impl MRZ {
         }));
     }
 
+    /// The zone as the document prints it, one string per row.
+    ///
+    /// It is stored and hashed as one run of characters, because that is how DG1 carries
+    /// it, but nothing is actually printed that way — a passport has two rows and an
+    /// identity card three, and a reader checking a zone against the document in their
+    /// hand wants the same shape in front of them.
+    pub fn rows(&self) -> Vec<String> {
+        let (raw, width) = match self {
+            Self::TD1(mrz) => (&mrz.raw_mrz, 30),
+            Self::TD3(mrz) => (&mrz.raw_mrz, 44),
+        };
+        return raw
+            .chars()
+            .collect::<Vec<char>>()
+            .chunks(width)
+            .map(|row| row.iter().collect())
+            .collect();
+    }
+
     /// What each entry of [`MRZ::validate_check_digits`] is checking, in the same order.
     pub fn check_digit_names(&self) -> &'static [&'static str] {
         return match self {
@@ -833,6 +852,16 @@ mod tests {
             }
         );
         assert!(failure.to_string().contains("TD2"));
+    }
+
+    #[test]
+    fn a_zone_comes_apart_into_the_rows_it_is_printed_as() {
+        let td3 = MRZ::from_recognized_lines(&lines(&[TD3_LINE_1, TD3_LINE_2])).unwrap();
+        assert_eq!(td3.rows(), vec![TD3_LINE_1, TD3_LINE_2]);
+
+        let td1 =
+            MRZ::from_recognized_lines(&lines(&[TD1_LINE_1, TD1_LINE_2, TD1_LINE_3])).unwrap();
+        assert_eq!(td1.rows(), vec![TD1_LINE_1, TD1_LINE_2, TD1_LINE_3]);
     }
 
     /// The most informative failure is the one worth showing, and a frame usually
