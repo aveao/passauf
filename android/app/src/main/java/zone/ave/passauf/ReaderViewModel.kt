@@ -93,8 +93,18 @@ sealed interface ReadState {
 
 class ReaderViewModel(application: Application) : AndroidViewModel(application) {
 
+    private val preferences = Preferences(application)
+
     private val _form = MutableStateFlow(AccessForm())
     val form: StateFlow<AccessForm> = _form.asStateFlow()
+
+    private val _blockScreenshots = MutableStateFlow(preferences.blockScreenshots)
+    val blockScreenshots: StateFlow<Boolean> = _blockScreenshots.asStateFlow()
+
+    fun setBlockScreenshots(block: Boolean) {
+        preferences.blockScreenshots = block
+        _blockScreenshots.value = block
+    }
 
     private val _state = MutableStateFlow<ReadState>(ReadState.Editing)
     val state: StateFlow<ReadState> = _state.asStateFlow()

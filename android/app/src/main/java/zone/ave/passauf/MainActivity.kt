@@ -1,7 +1,13 @@
 package zone.ave.passauf
 
 import android.nfc.NfcAdapter
+import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.launch
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -27,6 +33,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import zone.ave.passauf.ui.SettingsScreen
 import zone.ave.passauf.ui.InputScreen
 import zone.ave.passauf.ui.PassaufTheme
 import zone.ave.passauf.ui.ReadingScreen
@@ -48,6 +59,30 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         nfcAdapter = NfcAdapter.getDefaultAdapter(this)
+
+        // The app switcher takes a picture of whatever was last on screen, which for
+        // this app is a passport, and keeps it until the task is dismissed. Nobody asked
+        // for that one, so it goes where it can, regardless of the setting. Deliberate
+        // screenshots are a separate question and stay the user's to answer.
+        //
+        // Only from Android 13. Before that the single thumbnail cannot be suppressed on
+        // its own: FLAG_SECURE takes it away along with every screenshot, which is the
+        // trade this app declines to make for people. Said plainly in Settings instead.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            setRecentsScreenshotEnabled(false)
+        }
+
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.blockScreenshots.collect { block ->
+                    if (block) {
+                        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    } else {
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    }
+                }
+            }
+        }
 
         setContent {
             PassaufTheme {
@@ -90,19 +125,40 @@ class MainActivity : ComponentActivity() {
 private fun PassaufApp(viewModel: ReaderViewModel, nfcEnabled: Boolean) {
     val state by viewModel.state.collectAsState()
     val form by viewModel.form.collectAsState()
+    val blockScreenshots by viewModel.blockScreenshots.collectAsState()
+
+    // Local rather than a ReadState: settings are somewhere you step aside to, not a
+    // stage of reading a document, and the back stack should treat them that way.
+    var settings by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("passauf") },
+                title = { Text(if (settings) "Settings" else "passauf") },
                 navigationIcon = {
                     // Only the screens that came from the form can go back to it.
-                    if (state !is ReadState.Editing) {
+                    if (settings) {
+                        IconButton(onClick = { settings = false }) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                            )
+                        }
+                    } else if (state !is ReadState.Editing) {
                         IconButton(onClick = viewModel::backToForm) {
                             Icon(
                                 Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Back to the details",
                             )
+                        }
+                    }
+                },
+                actions = {
+                    // Only from the form: opening settings mid-read would either
+                    // interrupt it or pretend the change applied to it.
+                    if (!settings && state is ReadState.Editing) {
+                        IconButton(onClick = { settings = true }) {
+                            Icon(Icons.Filled.Settings, contentDescription = "Settings")
                         }
                     }
                 },
@@ -113,10 +169,22 @@ private fun PassaufApp(viewModel: ReaderViewModel, nfcEnabled: Boolean) {
         // back goes. Without this the system handles it and closes the app,
         // which throws away a read the user is still looking at.
         BackHandler(enabled = state !is ReadState.Editing, onBack = viewModel::backToForm)
+        BackHandler(enabled = settings) { settings = false }
 
         val modifier = Modifier
             .fillMaxSize()
             .padding(padding)
+
+        if (settings) {
+            SettingsScreen(
+                blockScreenshots = blockScreenshots,
+                onBlockScreenshotsChange = viewModel::setBlockScreenshots,
+                detailedLog = form.detailedLog,
+                onDetailedLogChange = { on -> viewModel.updateForm { it.copy(detailedLog = on) } },
+                modifier = modifier,
+            )
+            return@Scaffold
+        }
 
         if (!nfcEnabled) {
             NfcOffScreen(modifier)
