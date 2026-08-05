@@ -1,23 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A passport book with the contactless mark on it. -->
+<!--
+  The filler character of a machine readable zone, two rows of it.
+
+  Every travel document prints `<` by the dozen and nothing else prints it at all,
+  which is more than a passport book can say: a book with a wireless mark beside it
+  is also several banking apps and every other NFC reader on the phone.
+
+  Strokes rather than a filled shape with detail painted on top, so that the icon is
+  its own silhouette. Android tints the monochrome layer a single colour for a themed
+  icon, and anything drawn in a second colour over a filled shape — which is what this
+  replaces — disappears into it, leaving a blank rectangle.
+
+  Everything sits inside the 66dp circle centred on the 108dp canvas, which is the
+  area that survives every mask a launcher might apply.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M36,28h34a6,6 0 0 1 6,6v40a6,6 0 0 1 -6,6h-34a6,6 0 0 1 -6,-6v-40a6,6 0 0 1 6,-6z" />
-    <path
-        android:fillColor="#1B5E7E"
-        android:pathData="M46,44a1,1 0 0 1 0,0m0,0c4,-4 12,-4 16,0l-3,3c-3,-3 -7,-3 -10,0z" />
-    <path
-        android:fillColor="#1B5E7E"
-        android:pathData="M50,51c2,-2 6,-2 8,0l-3,3c-1,-1 -1,-1 -2,0z" />
-    <path
-        android:fillColor="#1B5E7E"
-        android:pathData="M42,37h22v3h-22z" />
-    <path
-        android:fillColor="#1B5E7E"
-        android:pathData="M42,62h22v3h-22zM42,68h22v3h-22z" />
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M46,34 L38,42 L46,50 M58,34 L50,42 L58,50 M70,34 L62,42 L70,50
+                          M46,58 L38,66 L46,74 M58,58 L50,66 L58,74 M70,58 L62,66 L70,74" />
 </vector>
