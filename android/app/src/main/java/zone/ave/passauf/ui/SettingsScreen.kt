@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
+import zone.ave.passauf.BuildConfig
 
 /** Where this came from. */
 private const val SOURCE = "https://github.com/aveao/passauf"
@@ -84,6 +85,17 @@ fun SettingsScreen(
 
         SourceLink()
 
+        // Which build this is, so a report of something going wrong can name it. The
+        // code is here as well as the name because it is what an install is compared
+        // by, and two builds can carry the same name.
+        Text(
+            "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = TextAlign.Center,
+        )
+
         Spacer(Modifier.height(24.dp))
     }
 }
@@ -114,7 +126,7 @@ private fun SourceLink() {
     ) {
         Icon(Icons.Filled.Code, contentDescription = null)
         Spacer(Modifier.padding(horizontal = 4.dp))
-        Text("Read the source")
+        Text("Get the source code")
     }
     Text(
         SOURCE.removePrefix("https://"),

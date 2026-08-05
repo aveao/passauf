@@ -98,6 +98,9 @@ android {
 
     buildFeatures {
         compose = true
+        // For the version the settings screen shows. Off by default since AGP 8, so
+        // asking for it is not optional.
+        buildConfig = true
     }
 
     packaging {
