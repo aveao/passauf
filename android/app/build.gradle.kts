@@ -32,6 +32,47 @@ android {
         }
     }
 
+    /**
+     * Release signing, if this machine has the key.
+     *
+     * The keystore and its password live in ~/.gradle/gradle.properties, never in the
+     * project. A signing key is the app's permanent identity: whoever holds it can
+     * publish an update that every device already carrying passauf will accept as
+     * genuine, and there is no revoking it for a sideloaded app. A properties file in
+     * the project directory is one `git add -A` away from making that everyone's key.
+     *
+     * Absent the properties a release build still succeeds, unsigned, so a fresh clone
+     * builds for anyone.
+     */
+    val keystore = (project.findProperty("passauf.storeFile") as String?)?.let(::file)
+    if (keystore?.exists() == true) {
+        signingConfigs {
+            create("release") {
+                storeFile = keystore
+                storePassword = project.property("passauf.storePassword") as String
+                keyAlias = project.property("passauf.keyAlias") as String
+                keyPassword = project.property("passauf.keyPassword") as String
+
+                // v1 is JAR signing, only needed below Android 7, and minSdk is 26.
+                enableV1Signing = false
+                enableV2Signing = true
+                // v3 carries a signing certificate lineage, which is the only way to
+                // ever rotate this key without every existing install refusing the
+                // update as coming from someone else. It costs nothing now and cannot
+                // be added retroactively to APKs already in the wild.
+                enableV3Signing = true
+
+                if (storePassword == "passauf") {
+                    logger.warn(
+                        "passauf: the release keystore is still on its placeholder " +
+                            "password. Whoever holds this key can ship an update every " +
+                            "existing install will accept. Change it before publishing."
+                    )
+                }
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -40,6 +81,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 
