@@ -46,11 +46,9 @@ fun SettingsScreen(
             title = "Block screenshots",
             explanation = "Stops the screen being captured or recorded while a document " +
                 "is showing, and keeps it out of the app switcher.\n\n" +
-                "Off by default. Nothing stops anyone photographing the printed page, " +
-                "and being able to keep a readable copy of what is in your own document " +
-                "is most of the point of this app. Worth turning on if you are sharing " +
-                "your screen, if your phone sends screenshots somewhere, or if the " +
-                "document is not yours.",
+                "Off by default. Nothing stops anyone photographing the printed page. " +
+                "Worth turning on if you are sharing your screen, if your phone sends " +
+                "screenshots somewhere, or if the document is not yours.",
             checked = blockScreenshots,
             onChange = onBlockScreenshotsChange,
         )
@@ -84,8 +82,7 @@ fun SettingsScreen(
  */
 private fun recentsNote(): String =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        "The app switcher preview is hidden either way. That is a picture nobody asked " +
-            "to be taken."
+        "The app switcher preview is hidden either way."
     } else {
         "On this version of Android the app switcher preview can only be hidden by " +
             "blocking screenshots as well; there is no way to remove just the one. " +
