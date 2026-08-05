@@ -1,7 +1,7 @@
 use cbc::cipher::{inout::block_padding, BlockModeDecrypt, BlockModeEncrypt, KeyIvInit};
 use rand::RngExt;
 use sha1::{Digest, Sha1};
-use simplelog::{debug, info};
+use simplelog::{info, trace};
 
 use crate::secure_messaging::{
     kdf, padding_method_2_pad, retail_mac, SecureMessaging, SmAlgorithm,
@@ -212,11 +212,11 @@ pub fn calculate_bac_eifd_and_mifd(
 
     // Concatinate RND.IFD, RND.IC and K.IFD into S (shared secret)
     let shared_secret = vec![rnd_ifd, rnd_ic, k_ifd].concat();
-    debug!("shared_secret: {:02x?}", shared_secret);
+    trace!("shared_secret: {:02x?}", shared_secret);
 
     // Concatinate MRZ with added check digits for key formation.
     let k_mrz = mrz_information(document_number, date_of_birth, date_of_expiry);
-    debug!("K.mrz: {:02x?}", k_mrz);
+    trace!("K.mrz: {:02x?}", k_mrz);
 
     // Calculate the seed for the key
     sha1_hasher.update(k_mrz.as_slice());
@@ -225,17 +225,17 @@ pub fn calculate_bac_eifd_and_mifd(
     // Derive keys K.enc and K.mac
     let k_enc = kdf(SmAlgorithm::Tdes, k_seed, 1);
     let k_mac = kdf(SmAlgorithm::Tdes, k_seed, 2);
-    debug!("K.enc: {:02x?}", k_enc);
-    debug!("K.mac: {:02x?}", k_mac);
+    trace!("K.enc: {:02x?}", k_enc);
+    trace!("K.mac: {:02x?}", k_mac);
 
     // Calculate E.IFD = E(KEnc, S)
     let e_ifd = tdes_enc(k_enc.as_slice(), &shared_secret);
-    debug!("E.ifd: {:02x?}", e_ifd);
+    trace!("E.ifd: {:02x?}", e_ifd);
 
     // Calculate M.IFD = MAC(K.MAC, E.IFD)
     // Here we use Retail Mac (ISO 9797-1 MAC format 3) with Padding Method 2
     let m_ifd = retail_mac(&k_mac, &padding_method_2_pad(&e_ifd, 8));
-    debug!("M.ifd: {:02x?}", m_ifd);
+    trace!("M.ifd: {:02x?}", m_ifd);
 
     return (k_enc, e_ifd, m_ifd);
 }
@@ -251,24 +251,24 @@ pub fn calculate_bac_session_keys(
 ) -> (Vec<u8>, Vec<u8>) {
     // Decrypt data we receive as response to BAC EXTERNAL_AUTHENTICATE
     let dec_resp = tdes_dec(k_enc, &auth_resp);
-    debug!("Decoded auth response: {:x?}", dec_resp);
+    trace!("Decoded auth response: {:x?}", dec_resp);
     // Compare received RND.IFD with generated RND.IFD.
     assert!(&dec_resp[8..16] == rnd_ifd);
 
     // Calculate K.seed = XOR(K.IFD, K.IC)
     let k_ic = &dec_resp[16..32];
-    debug!("K.IC: {:x?}", k_ic);
+    trace!("K.IC: {:x?}", k_ic);
     let mut k_seed = [0u8; 16];
     for i in 0..16 {
         k_seed[i] = k_ifd[i] ^ k_ic[i];
     }
-    debug!("K.seed: {:x?}", k_seed);
+    trace!("K.seed: {:x?}", k_seed);
 
     // Calculate session keys (KS.enc, KS.mac)
     let ks_enc = kdf(SmAlgorithm::Tdes, &k_seed, 1);
     let ks_mac = kdf(SmAlgorithm::Tdes, &k_seed, 2);
-    debug!("KS.enc: {:x?}", ks_enc);
-    debug!("KS.mac: {:x?}", ks_mac);
+    trace!("KS.enc: {:x?}", ks_enc);
+    trace!("KS.mac: {:x?}", ks_mac);
     return (ks_enc, ks_mac);
 }
 

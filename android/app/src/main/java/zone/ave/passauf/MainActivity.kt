@@ -144,6 +144,7 @@ private fun PassaufApp(viewModel: ReaderViewModel, nfcEnabled: Boolean) {
                 directory = current.directory,
                 keyKind = current.keyKind,
                 filesOnDisk = current.filesOnDisk,
+                detailedLog = form.detailedLog,
                 onDone = viewModel::backToForm,
                 // Straight back to waiting for a tag, with the details the user
                 // already entered: a lost connection needs no re-typing.

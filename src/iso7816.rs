@@ -396,7 +396,15 @@ pub fn select_and_read_file(
 
         total_data.extend(apdu_data);
     }
-    debug!("Read file ({:?}b): {:?}", total_data.len(), total_data);
+    debug!("Read file ({:?}b)", total_data.len());
+    // The bytes themselves are the document: a face, a name, a date of birth. Knowing a
+    // file arrived and how big it was is what diagnoses a read; the contents are only
+    // ever wanted when chasing a parser bug, and that is worth having to ask for.
+    trace!(
+        "File contents ({:?}b): {:02x?}",
+        total_data.len(),
+        total_data
+    );
     // only return data if it's not empty.
     return if total_data.is_empty() {
         None

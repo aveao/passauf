@@ -72,13 +72,24 @@ impl From<JsonAccessKey> for AccessKey {
     }
 }
 
+/// How talkative to be, as far as the app is allowed to ask.
+///
+/// **`trace` is deliberately not reachable from here.** That level carries session keys,
+/// the MRZ-derived seed and the decrypted contents of every file, and the app can hand
+/// its log to a share sheet. Nothing an app user is diagnosing needs a key: the level
+/// exists for the CLI, where the person running it is holding the document and reading
+/// their own terminal.
+///
+/// Refused at the parse rather than by leaving it out of a picker, because a picker is a
+/// suggestion — this string arrives as JSON from the other side of the boundary, and
+/// anything that can build that JSON could ask for trace.
 fn log_level(name: &Option<String>) -> LevelFilter {
     return match name.as_deref().unwrap_or("info").to_lowercase().as_str() {
-        "trace" => LevelFilter::Trace,
         "debug" => LevelFilter::Debug,
         "warn" => LevelFilter::Warn,
         "error" => LevelFilter::Error,
         "off" => LevelFilter::Off,
+        // Includes "trace", which lands here rather than being honoured.
         _ => LevelFilter::Info,
     };
 }
@@ -500,5 +511,23 @@ mod tests {
         assert_eq!(log_level(&Some("debug".to_string())), LevelFilter::Debug);
         assert_eq!(log_level(&None), LevelFilter::Info);
         assert_eq!(log_level(&Some("shout".to_string())), LevelFilter::Info);
+    }
+
+    /// trace prints session keys, the MRZ-derived seed and the decrypted contents of
+    /// every file, and the app can hand its log to a share sheet. Leaving the level out
+    /// of a picker is not enough, because this string arrives as JSON from the far side
+    /// of the boundary: it has to be refused here.
+    #[test]
+    fn the_app_cannot_ask_for_trace() {
+        assert_eq!(log_level(&Some("trace".to_string())), LevelFilter::Info);
+        assert_eq!(log_level(&Some("TRACE".to_string())), LevelFilter::Info);
+        assert_eq!(log_level(&Some("Trace".to_string())), LevelFilter::Info);
+    }
+
+    #[test]
+    fn the_levels_the_app_may_ask_for_still_work() {
+        assert_eq!(log_level(&Some("warn".to_string())), LevelFilter::Warn);
+        assert_eq!(log_level(&Some("error".to_string())), LevelFilter::Error);
+        assert_eq!(log_level(&Some("off".to_string())), LevelFilter::Off);
     }
 }

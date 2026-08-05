@@ -149,6 +149,32 @@ fun InputScreen(
             }
         }
 
+        Card {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Detailed log", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Records what the document contained, file by file, so a read " +
+                            "that goes wrong can be worked out afterwards. Turn it on " +
+                            "only for that, and do not send the result to anyone. Off " +
+                            "again next time the app starts.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.padding(horizontal = 8.dp))
+                Switch(
+                    checked = form.detailedLog,
+                    onCheckedChange = { on -> onChange { it.copy(detailedLog = on) } },
+                )
+            }
+        }
+
         Button(
             onClick = onReady,
             enabled = form.isComplete,

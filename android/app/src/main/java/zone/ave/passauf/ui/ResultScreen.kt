@@ -81,6 +81,8 @@ fun ResultScreen(
     directory: File?,
     keyKind: KeyKind,
     filesOnDisk: Boolean,
+    /** Whether this read was recorded in detail, which changes what the log holds. */
+    detailedLog: Boolean,
     onDone: () -> Unit,
     onRetry: () -> Unit,
     onDiscardFiles: () -> Unit,
@@ -161,6 +163,18 @@ fun ResultScreen(
                         onClick = { Sharing.shareLog(context, directory, report.log) },
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Export the log") }
+                    if (detailedLog) {
+                        // The ordinary log says what happened. This one says what was
+                        // read, file by file, and someone exports a log precisely when
+                        // they are about to send it to a stranger for help.
+                        Text(
+                            "This log was recorded in detail, so it contains the " +
+                                "contents of the document itself. Do not send it to " +
+                                "anyone.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                 }
                 OutlinedButton(onClick = onDone, modifier = Modifier.fillMaxWidth()) {
                     Text("Read another document")

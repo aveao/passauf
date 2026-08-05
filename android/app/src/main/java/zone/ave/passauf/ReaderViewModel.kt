@@ -36,6 +36,14 @@ data class AccessForm(
     val dateOfExpiry: String = "",
     val cardAccessNumber: String = "",
     val readImages: Boolean = true,
+    /**
+     * Records far more about the read, including the contents of every file.
+     *
+     * Deliberately not persisted anywhere: it lives in this form, so it is back off
+     * again next time the app starts. Someone who turned it on to chase one problem
+     * should not still be recording everything a month later.
+     */
+    val detailedLog: Boolean = false,
 ) {
     val isComplete: Boolean
         get() = when (kind) {
@@ -181,6 +189,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                         readBinaryFiles = form.readImages,
                         dumpPath = directory.absolutePath,
                         filePrefix = form.dumpName(),
+                        logLevel = if (form.detailedLog) "debug" else "info",
                     ),
                     transceiver = { apdu ->
                         try {

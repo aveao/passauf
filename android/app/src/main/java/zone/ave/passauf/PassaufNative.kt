@@ -189,7 +189,15 @@ data class ReadOptions(
     /** Directory to write the document's files into. Must already exist. */
     val dumpPath: String? = null,
     val filePrefix: String? = null,
-    val logLevel: String = "debug",
+    /**
+     * One of info, debug, warn, error, off.
+     *
+     * `trace` is not on that list and asking for it yields info: that level prints
+     * session keys, the MRZ-derived seed and the decrypted contents of every file, and
+     * a log this app holds can be handed to a share sheet. The Rust side refuses it
+     * rather than trusting this side to not ask.
+     */
+    val logLevel: String = "info",
 )
 
 @Serializable

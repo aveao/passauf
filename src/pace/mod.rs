@@ -7,7 +7,7 @@ pub mod oids;
 pub mod password;
 
 use iso7816_tlv::ber;
-use simplelog::{debug, info, warn};
+use simplelog::{debug, info, trace, warn};
 use std::collections::HashMap;
 
 use crate::helpers;
@@ -127,7 +127,7 @@ impl PendingChipAuthentication {
                 return false;
             }
         };
-        debug!("CA.IC * PK.IC: {:02x?}", product);
+        trace!("CA.IC * PK.IC: {:02x?}", product);
         return product == self.chip_mapping_public_key;
     }
 
@@ -432,7 +432,7 @@ pub fn do_pace_authentication(
     // 4.4.3.3 encrypts the nonce in CBC mode with an all-zero IV, which is not
     // the session's IV rule, so this does not go through SecureMessaging.
     let nonce_s = cbc_decrypt_zero_iv(cipher, &kpi, &encrypted_nonce);
-    debug!("nonce s: {:02x?}", nonce_s);
+    trace!("nonce s: {:02x?}", nonce_s);
 
     // Step 2: map the nonce to a fresh generator. Chip Authentication Mapping
     // needs the chip's mapping key again in step 4.
@@ -484,7 +484,7 @@ pub fn do_pace_authentication(
             map_integrated(&agreement, cipher, &nonce_s, &nonce_t)?
         }
     };
-    debug!("mapped generator: {:02x?}", mapped_generator);
+    trace!("mapped generator: {:02x?}", mapped_generator);
 
     // Step 3: agree a shared secret over the mapped generator.
     let (ephemeral_secret, ephemeral_public) = agreement
@@ -518,8 +518,8 @@ pub fn do_pace_authentication(
 
     let ks_enc = kdf(cipher, &shared_secret, 1);
     let ks_mac = kdf(cipher, &shared_secret, 2);
-    debug!("KS.enc: {:02x?}", ks_enc);
-    debug!("KS.mac: {:02x?}", ks_mac);
+    trace!("KS.enc: {:02x?}", ks_enc);
+    trace!("KS.mac: {:02x?}", ks_mac);
 
     // PACE always starts its send sequence counter at zero.
     let sm = SecureMessaging::new(cipher, ks_enc, ks_mac);
