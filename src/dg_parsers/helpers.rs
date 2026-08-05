@@ -403,6 +403,8 @@ const ISSUER_SPECIFIC_CODES: &[(&str, &str, &str)] = &[
     ("BEL", "PO", "Official Passport"),
     ("BEL", "PS", "1954 Convention Travel Document"),
     ("BGR", "IX", "Residence Permit Card"),
+    ("CAN", "CA", "Permanent Resident Card"),
+    ("CAN", "CR", "Permanent Resident Card"),
     ("CHE", "PA", "Passport"),
     ("CHE", "PB", "Diplomatic Passport"),
     ("CHE", "PC", "Service Passport"),
@@ -427,6 +429,9 @@ const ISSUER_SPECIFIC_CODES: &[(&str, &str, &str)] = &[
     // for it, and this table asks who issued a document rather than which country.
     ("EUE", "PL", "Laissez-Passer"),
     ("FRA", "CF", "Border Worker Card"),
+    // Agrees with the general rule for PT. Kept as a row because the United
+    // Kingdom's use of it is recorded, not inferred from the letters.
+    ("GBR", "PT", "Travel Document"),
     // Croatia uses AD for residence permit cards, which is the general meaning of AD
     // anyway. AB is a different document.
     ("HRV", "AB", "Residence Card"),
@@ -484,6 +489,11 @@ const ISSUER_SPECIFIC_CODES: &[(&str, &str, &str)] = &[
     ("POL", "IS", "Permanent Residence Card (EEA Family Member)"),
     (
         "POL",
+        "IT",
+        "Foreigner's Temporary ID Document (International Protection Applicant)",
+    ),
+    (
+        "POL",
         "IW",
         "Certificate of Registration of Stay (UK Citizen)",
     ),
@@ -501,6 +511,12 @@ const ISSUER_SPECIFIC_CODES: &[(&str, &str, &str)] = &[
     ("SWE", "CR", "EU (Permanent) Residence Card"),
     ("SWE", "PE", "Emergency Passport"),
     ("SWE", "S<", "Seaman's Discharge Book"),
+    // 9303 Part 5 says a card code starts with A, C or I, and V is not to be used
+    // at all. The United States issues a border crossing card as VB regardless,
+    // which the general rules would otherwise report as disallowed rather than as
+    // the document somebody is holding.
+    ("USA", "C1", "Permanent Resident Card (Green Card)"),
+    ("USA", "VB", "Border Crossing Card"),
 ];
 
 /// A nationality or issuing state code as something readable, code included.
@@ -764,6 +780,22 @@ mod tests {
     #[test]
     fn an_issuer_code_that_is_not_a_passport_still_resolves() {
         assert_eq!(code("DV", "ESP"), "Travel Document");
+    }
+
+    /// A code the standard forbids is still on a document somebody is holding.
+    ///
+    /// 9303 Part 5 says a card code begins with A, C or I and that V is not to be used.
+    /// The United States prints VB on a border crossing card anyway, and reporting that
+    /// as "disallowed" would be telling a reader about the standard when they asked
+    /// about the card in their hand. The table gets there first; the complaint is still
+    /// waiting for anyone who prints a V that nobody has claimed.
+    #[test]
+    fn a_code_the_standard_forbids_is_still_named_where_it_is_known() {
+        assert_eq!(code("VB", "USA"), "Border Crossing Card");
+        assert_eq!(code("VB", "UTO"), "VB (Disallowed by ICAO 9303, Part 5)");
+        // A digit for the second character is nobody's rule but it parses fine.
+        assert_eq!(code("C1", "USA"), "Permanent Resident Card (Green Card)");
+        assert_eq!(code("C1", "UTO"), "ID Card (likely)");
     }
 
     /// The card codes that belong to one issuer, now that they are rows rather than
