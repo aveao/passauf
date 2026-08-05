@@ -36,6 +36,57 @@ impl types::EFDG11 {
     }
 }
 
+/// The names in DG11's other-names group.
+///
+/// 9303 does not repeat 5F0F at the top level the way every other field of this
+/// file appears. It wraps them in an A0 group holding a count and then one 5F0F
+/// per name, which makes them invisible to a lookup over the file's own tags —
+/// so they were read as absent no matter what a document put there, and an
+/// issuer that files part of a name here lost it entirely.
+///
+/// Top level 5F0F is picked up as well. Nothing in 9303 puts one there, but it
+/// costs a line, and a name that a document went to the trouble of recording is
+/// worth more than a point about where it belongs.
+fn other_names(tlvs: &Vec<ber::Tlv>) -> Option<Vec<String>> {
+    let mut names = read_names(&helpers::get_tlvs_by_tag(tlvs, 0x5F0F));
+
+    for group in helpers::get_tlvs_by_tag(tlvs, 0xA0) {
+        let inside = helpers::get_tlv_constructed_value(group);
+        let entries = helpers::get_tlvs_by_tag(&inside, 0x5F0F);
+
+        // The count the group opens with, so a document that disagrees with
+        // itself says so somewhere rather than quietly coming up short.
+        let claimed = dg_helpers::tlv_get_byte(&helpers::sort_tlvs_by_tag(&inside), &0x02);
+        if let Some(claimed) = claimed {
+            if usize::from(claimed) != entries.len() {
+                warn!(
+                    "EF.DG11 says it carries {} other name(s) but holds {}.",
+                    claimed,
+                    entries.len()
+                );
+            }
+        }
+        names.append(&mut read_names(&entries));
+    }
+
+    if names.is_empty() {
+        return None;
+    }
+    return Some(names);
+}
+
+/// Each of those TLVs as a name, with the MRZ's filler turned back into spaces.
+fn read_names(tlvs: &[&ber::Tlv]) -> Vec<String> {
+    return tlvs
+        .iter()
+        // A name that is not valid UTF-8 is one we cannot render. That is worth
+        // losing the name over, not the whole read.
+        .filter_map(|tlv| String::from_utf8(helpers::get_tlv_value_bytes(tlv)).ok())
+        .map(|name| name.replace('<', " ").trim().to_string())
+        .filter(|name| !name.is_empty())
+        .collect();
+}
+
 pub fn parser(
     data: &Vec<u8>,
     data_group: &types::DataGroup,
@@ -62,7 +113,7 @@ pub fn parser(
     // Deserialize the file from the given TLV data.
     let result = types::EFDG11 {
         full_name: dg_helpers::tlv_get_string_value(&tlvs, &0x5F0E),
-        other_names: None, // TODO: impl this
+        other_names: other_names(&base_tlv_value),
         personal_number: dg_helpers::tlv_get_string_value(&tlvs, &0x5F10),
         full_date_of_birth: dg_helpers::tlv_get_string_value(&tlvs, &0x5F2B),
         place_of_birth: dg_helpers::tlv_get_string_value(&tlvs, &0x5F11),
@@ -118,4 +169,112 @@ pub fn dumper(
         written.push(file_path);
     }
     return Ok(written);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A DER TLV with a length short enough to fit one byte, which every field
+    /// these tests build is.
+    fn tlv(tag: &[u8], value: &[u8]) -> Vec<u8> {
+        let mut out = tag.to_vec();
+        out.push(value.len() as u8);
+        out.extend_from_slice(value);
+        return out;
+    }
+
+    fn parse(body: Vec<u8>) -> types::EFDG11 {
+        let dg_info = types::DATA_GROUPS
+            .iter()
+            .find(|dg_info| dg_info.name == "EF.DG11")
+            .unwrap();
+        match parser(&tlv(&[0x6B], &body), dg_info, false) {
+            Some(types::ParsedDataGroup::EFDG11(dg11)) => dg11,
+            other => panic!("EF.DG11 did not parse: {:02x?}", other),
+        }
+    }
+
+    /// The names 9303 puts in the other-names group.
+    ///
+    /// They are the one field of this file that is not a tag at the top level:
+    /// A0 wraps a count and then one 5F0F per name. Looking for 5F0F beside the
+    /// other tags finds nothing, which is what this file did for its whole life,
+    /// so a document that recorded a name here had it dropped without a word.
+    #[test]
+    fn reads_the_names_in_the_other_names_group() {
+        let dg11 = parse(
+            [
+                tlv(&[0x5F, 0x0E], b"MUSTERMANN<<ERIKA"),
+                tlv(
+                    &[0xA0],
+                    &[
+                        vec![0x02, 0x01, 0x02],
+                        tlv(&[0x5F, 0x0F], b"SCHMIDT"),
+                        tlv(&[0x5F, 0x0F], b"VON<HOFFMANN"),
+                    ]
+                    .concat(),
+                ),
+            ]
+            .concat(),
+        );
+
+        assert_eq!(dg11.full_name, Some("MUSTERMANN<<ERIKA".to_string()));
+        assert_eq!(
+            dg11.other_names,
+            Some(vec!["SCHMIDT".to_string(), "VON HOFFMANN".to_string()])
+        );
+    }
+
+    /// A document with nothing in the group must not grow an empty row for it.
+    #[test]
+    fn leaves_other_names_absent_when_there_are_none() {
+        let dg11 = parse(tlv(&[0x5F, 0x0E], b"MUSTERMANN<<ERIKA"));
+        assert_eq!(dg11.other_names, None);
+    }
+
+    /// Some issuers write the name with a space where 9303 wants `<<`.
+    ///
+    /// Nothing can recover which half is the family name once that has happened,
+    /// so the whole string stands as the name rather than being guessed at.
+    #[test]
+    fn keeps_a_name_that_was_separated_with_a_space() {
+        let dg11 = parse(tlv(&[0x5F, 0x0E], b"ERIKA MUSTERMANN"));
+        assert_eq!(dg11.full_name, Some("ERIKA MUSTERMANN".to_string()));
+
+        let (given_names, surname) = dg_helpers::format_mrz_name(&dg11.full_name.clone().unwrap());
+        assert_eq!(given_names, "ERIKA MUSTERMANN");
+        assert_eq!(surname, "");
+    }
+
+    /// 5F2B is YYYYMMDD, and issuers write the MRZ's six digits into it.
+    ///
+    /// Eight digits are there so the century does not have to be guessed; six
+    /// throw that away. Reading them anyway beats losing a date of birth.
+    #[test]
+    fn reads_a_date_of_birth_that_is_missing_its_century() {
+        let dg11 = parse(
+            [
+                tlv(&[0x5F, 0x0E], b"MUSTERMANN<<ERIKA"),
+                tlv(&[0x5F, 0x2B], b"740812"),
+            ]
+            .concat(),
+        );
+        assert_eq!(dg11.full_date_of_birth, Some("740812".to_string()));
+        assert_eq!(
+            dg_helpers::parse_dg_date(&dg11.full_date_of_birth.unwrap()),
+            Some((12, 8, 1974)),
+        );
+    }
+
+    /// And the format the standard actually asks for still wins.
+    #[test]
+    fn still_reads_a_date_of_birth_with_its_century() {
+        assert_eq!(
+            dg_helpers::parse_dg_date(&"19740812".to_string()),
+            Some((12, 8, 1974))
+        );
+        assert_eq!(dg_helpers::parse_dg_date(&"7408".to_string()), None);
+        assert_eq!(dg_helpers::parse_dg_date(&"7408AB".to_string()), None);
+    }
 }

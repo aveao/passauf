@@ -265,10 +265,20 @@ pub fn text_to_numeric(text: &String) -> Option<Vec<u8>> {
     return Some(result_vec);
 }
 
-/// Parses a date from a DG. Must be in YYYYMMDD format.
+/// Parses a date from a DG. YYYYMMDD, as 9303 has it.
 ///
-/// Returns (DD, MM, YYYY) if it is in correct format, else None.
+/// Six digits are taken as the MRZ's YYMMDD and read the same way. Issuers do
+/// write them: a data group gives four year digits precisely so that nobody has
+/// to guess the century, and one that fills the field with the MRZ's format
+/// instead has thrown that away. Reading it anyway beats dropping a date of
+/// birth on the floor, but it inherits the MRZ's guess along with its format —
+/// see [`parse_mrz_date`] for where the century is cut.
+///
+/// Returns (DD, MM, YYYY) if it is in either format, else None.
 pub fn parse_dg_date(text: &String) -> Option<(u8, u8, u16)> {
+    if text.len() == 6 {
+        return parse_mrz_date(text);
+    }
     if text.len() != 8 {
         return None;
     }
