@@ -6,6 +6,9 @@ import android.nfc.tech.IsoDep
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -109,6 +112,17 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     private val _state = MutableStateFlow<ReadState>(ReadState.Editing)
     val state: StateFlow<ReadState> = _state.asStateFlow()
 
+    /**
+     * The read currently in flight, if there is one.
+     *
+     * Kept because a read cannot simply be forgotten about. It holds the tag connection
+     * open, it is sitting inside a blocking native call, and when it eventually returns
+     * it will write its result over whatever the user has moved on to. Without a handle
+     * on it there is no way to say "stop", and a read that has hung takes the app with
+     * it until the process is restarted.
+     */
+    private var readJob: Job? = null
+
     init {
         // Anything still here belongs to a previous run of the app, which by
         // now has either been exported or is not wanted. A crash mid-read is
@@ -152,7 +166,22 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun backToForm() {
+        abandonRead()
         _state.value = ReadState.Editing
+    }
+
+    /**
+     * Give up on the read in flight, if any.
+     *
+     * Cancelling the coroutine is only half of it: the read is blocked inside a native
+     * call that knows nothing about coroutines, and will stay there until the chip
+     * answers or the timeout runs out — twenty seconds per exchange, and there are
+     * hundreds. The other half is the transceiver, which starts returning nothing once
+     * the job is no longer active, so the read unwinds at the next APDU instead.
+     */
+    private fun abandonRead() {
+        readJob?.cancel()
+        readJob = null
     }
 
     /** Whether a tag arriving now should be read. */
@@ -168,9 +197,15 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
         if (!wantsTag()) {
             return
         }
+        // One at a time. A previous read still running owns the tag connection, and
+        // starting a second would have two of them talking to one chip.
+        if (readJob?.isActive == true) {
+            Log.w(TAG, "A read is already running; ignoring this tag.")
+            return
+        }
         _state.value = ReadState.Reading("connecting", "Connecting to the document")
 
-        viewModelScope.launch(Dispatchers.IO) {
+        readJob = viewModelScope.launch(Dispatchers.IO) {
             val form = _form.value
             val isoDep = IsoDep.get(tag)
             if (isoDep == null) {
@@ -202,21 +237,42 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                         logLevel = if (form.detailedLog) "debug" else "info",
                     ),
                     transceiver = { apdu ->
-                        try {
-                            isoDep.transceive(apdu)
-                        } catch (error: IOException) {
-                            // The document moved. Returning null lets passauf
-                            // unwind cleanly and report what it already has.
-                            Log.w(TAG, "Lost the tag mid-exchange", error)
-                            null
+                        when {
+                            // The only way out of a blocking native call: passauf treats
+                            // nothing-back as a lost tag and unwinds, which it already
+                            // knows how to do.
+                            !isActive -> {
+                                Log.i(TAG, "Read abandoned; answering no further APDUs.")
+                                null
+                            }
+                            else -> try {
+                                isoDep.transceive(apdu)
+                            } catch (error: IOException) {
+                                // The document moved. Returning null lets passauf
+                                // unwind cleanly and report what it already has.
+                                Log.w(TAG, "Lost the tag mid-exchange", error)
+                                null
+                            }
                         }
                     },
                     progress = { stage, message ->
                         _state.value = ReadState.Reading(stage, message)
                     },
                 )
-                _state.value = ReadState.Finished(report, directory, form.kind)
-            } catch (error: Exception) {
+                // A read the user walked away from must not write itself over whatever
+                // they are looking at now.
+                if (isActive) {
+                    _state.value = ReadState.Finished(report, directory, form.kind)
+                }
+            } catch (abandoned: CancellationException) {
+                Log.i(TAG, "Read abandoned.")
+                throw abandoned
+            } catch (error: Throwable) {
+                // Throwable, not Exception. An OutOfMemoryError or a link error is not
+                // an Exception, and letting one past here leaves the state on Reading
+                // for good: nothing else moves it, so every later tap is ignored and
+                // only restarting the app helps. That is the failure this catch exists
+                // for, far more than the ordinary ones.
                 Log.e(TAG, "Read failed", error)
                 _state.value = ReadState.Finished(
                     DocumentReport(
@@ -228,6 +284,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
                 )
             } finally {
                 runCatching { isoDep.close() }
+                Log.i(TAG, "Read finished, tag released.")
             }
         }
     }

@@ -344,6 +344,18 @@ fn read<'local>(
 }
 
 /// Hand one APDU to `IsoDep.transceive` and bring the response back.
+/// Hand one APDU to the tag and wait for its answer.
+///
+/// Everything here happens inside a local frame, and that is not tidiness. A JNI local
+/// reference lives until the *native method* returns, and reading a document is one
+/// native method with hundreds of exchanges inside it — every byte array in and every
+/// byte array out. Reading a passport with its portrait is comfortably two hundred
+/// exchanges, and a document carrying a signature or extra photographs runs to several
+/// hundred more.
+///
+/// ART aborts the process at 512 outstanding local references, with `local reference
+/// table overflow` and nothing else useful. The frame gives each exchange its own
+/// scope, so the count returns to zero every APDU rather than climbing all read.
 fn transceive<'local>(
     env_cell: &RefCell<JNIEnv<'local>>,
     transceiver: &JObject<'local>,
@@ -351,6 +363,26 @@ fn transceive<'local>(
 ) -> Option<Vec<u8>> {
     let mut env = env_cell.borrow_mut();
 
+    // Two references per exchange is the normal case; the rest is headroom.
+    let framed: Result<Option<Vec<u8>>, jni::errors::Error> =
+        env.with_local_frame(8, |env| Ok(exchange(env, transceiver, apdu)));
+
+    return match framed {
+        Ok(response) => response,
+        Err(error) => {
+            log::error!("Could not make room to talk to the tag: {}", error);
+            None
+        }
+    };
+}
+
+/// The exchange itself, running inside the frame [`transceive`] set up.
+///
+/// The two lifetimes are deliberately unrelated. Inside a local frame the environment
+/// is handed over with a fresh, shorter lifetime, while the transceiver object belongs
+/// to the frame outside it — tying them together would demand the outer one live as
+/// long as the inner, which is backwards.
+fn exchange(env: &mut JNIEnv<'_>, transceiver: &JObject<'_>, apdu: &[u8]) -> Option<Vec<u8>> {
     let command = match env.byte_array_from_slice(apdu) {
         Ok(command) => command,
         Err(error) => {
@@ -406,6 +438,18 @@ fn notify_progress<'local>(
     }
     let mut env = env_cell.borrow_mut();
 
+    // Two strings per call, once per file, for the same reason the exchange above is
+    // framed: everything made here would otherwise sit in the local reference table
+    // until the whole read returns.
+    let framed: Result<(), jni::errors::Error> =
+        env.with_local_frame(8, |env| Ok(report(env, progress, stage)));
+    if let Err(error) = framed {
+        log::warn!("Could not report progress: {}", error);
+    }
+}
+
+/// The call itself, inside the frame [`notify_progress`] set up.
+fn report(env: &mut JNIEnv<'_>, progress: &JObject<'_>, stage: &session::Progress) {
     // The stage name is for the app to branch on, the message for it to show.
     let name = match stage {
         session::Progress::ReadingCardAccess => "readingCardAccess",
