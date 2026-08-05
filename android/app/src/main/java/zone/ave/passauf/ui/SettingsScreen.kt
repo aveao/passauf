@@ -1,6 +1,9 @@
 package zone.ave.passauf.ui
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.os.Build
+import android.util.Log
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,14 +14,24 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
+
+/** Where this came from. */
+private const val SOURCE = "https://github.com/aveao/passauf"
 
 /**
  * The few things worth choosing, and why each one is worth choosing rather than being
@@ -69,8 +82,47 @@ fun SettingsScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
+        SourceLink()
+
         Spacer(Modifier.height(24.dp))
     }
+}
+
+/**
+ * Where the source is.
+ *
+ * An app that reads passports and says it keeps them to itself is asking to be taken at
+ * its word. It should not have to be: the way to check any of it is to read it, so the
+ * address is in the app rather than only in a listing somewhere.
+ *
+ * Handing a URL to ACTION_VIEW asks the browser to fetch it, and needs no INTERNET
+ * permission here — this app still cannot reach the network, which is the point.
+ */
+@Composable
+private fun SourceLink() {
+    val context = LocalContext.current
+    TextButton(
+        onClick = {
+            try {
+                context.startActivity(Intent(Intent.ACTION_VIEW, SOURCE.toUri()))
+            } catch (error: ActivityNotFoundException) {
+                // No browser to hand it to, which is unusual but not worth a crash.
+                Log.w("passauf", "Nothing here opens a link.", error)
+            }
+        },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Icon(Icons.Filled.Code, contentDescription = null)
+        Spacer(Modifier.padding(horizontal = 4.dp))
+        Text("Read the source")
+    }
+    Text(
+        SOURCE.removePrefix("https://"),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth(),
+        textAlign = TextAlign.Center,
+    )
 }
 
 /**
