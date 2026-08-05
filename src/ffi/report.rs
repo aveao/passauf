@@ -172,6 +172,14 @@ pub struct DocumentReport {
     /// Given names, space separated.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub given_names: Option<String>,
+    /// The holder's name as DG11 spells it out, when the document carries one.
+    ///
+    /// From DG11 rather than the MRZ because the MRZ is the abbreviated copy:
+    /// it truncates a name that does not fit its rows and has no way to write
+    /// anything outside its own character set. DG11 is where the issuer put the
+    /// name in full, so it is the one to show someone.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub full_name: Option<String>,
     /// "Male", "Female" or "X (or unspecified)".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sex: Option<String>,
@@ -338,6 +346,7 @@ fn document(read: &DocumentRead) -> DocumentReport {
     if let Some(ParsedDataGroup::EFDG11(dg11)) =
         read.file("EF.DG11").and_then(|file| file.parsed.as_ref())
     {
+        document.full_name = dg11_full_name(dg11);
         document.personal_details = personal_details(dg11);
     }
 
@@ -428,9 +437,12 @@ fn fill_from_mrz(document: &mut DocumentReport, mrz: &types::MRZ) {
     document.optional_data = Some(optional_data).filter(|text| !text.is_empty());
 }
 
-fn personal_details(dg11: &types::EFDG11) -> Vec<Detail> {
-    let mut details = vec![];
-    let full_name = dg11
+/// The holder's name as DG11 records it, given names first.
+///
+/// DG11 separates the family name the same way the MRZ does, with `<<`, so it
+/// goes through the same splitter.
+fn dg11_full_name(dg11: &types::EFDG11) -> Option<String> {
+    return dg11
         .full_name
         .as_ref()
         .map(|name| {
@@ -440,8 +452,11 @@ fn personal_details(dg11: &types::EFDG11) -> Vec<Detail> {
                 .to_string()
         })
         .filter(|name| !name.is_empty());
+}
 
-    details.extend(Detail::optional("Full name", &full_name));
+fn personal_details(dg11: &types::EFDG11) -> Vec<Detail> {
+    let mut details = vec![];
+    details.extend(Detail::optional("Full name", &dg11_full_name(dg11)));
     if let Some(other_names) = dg11.other_names.as_ref().filter(|names| !names.is_empty()) {
         details.push(Detail::new("Other names", other_names.join(", ")));
     }

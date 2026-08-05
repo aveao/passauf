@@ -389,7 +389,7 @@ private fun IdentityCard(
                 Spacer(Modifier.width(16.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        document.fullName ?: "Unknown holder",
+                        document.displayName ?: "Unknown holder",
                         style = MaterialTheme.typography.titleLarge,
                     )
                     document.documentType?.let {

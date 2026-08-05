@@ -102,6 +102,30 @@ class WireFormatTest {
         assertEquals(null, report.error)
     }
 
+    /**
+     * The name on the front of the result is DG11's where there is one.
+     *
+     * The MRZ truncates a name that will not fit its rows, so a document that carries
+     * both is carrying the short version and the full one, and the screen should be
+     * showing the full one.
+     */
+    @Test
+    fun `the name shown prefers DG11 over the MRZ`() {
+        val fromMrz = passaufJson.decodeFromString<DocumentDetails>(
+            """{"surname":"MUSTERMANN","givenNames":"ERIKA"}""",
+        )
+        assertEquals("ERIKA MUSTERMANN", fromMrz.displayName)
+
+        val fromDg11 = passaufJson.decodeFromString<DocumentDetails>(
+            """{"surname":"MUSTERMANN","givenNames":"ERIKA",
+                "fullName":"ERIKA MARIA MUSTERMANN-SCHMIDT"}""",
+        )
+        assertEquals("ERIKA MARIA MUSTERMANN-SCHMIDT", fromDg11.displayName)
+
+        // A document with neither has no name to show, and the screen says so itself.
+        assertEquals(null, passaufJson.decodeFromString<DocumentDetails>("{}").displayName)
+    }
+
     /** A read that failed before it got anywhere still has to decode. */
     @Test
     fun `a failure report decodes`() {

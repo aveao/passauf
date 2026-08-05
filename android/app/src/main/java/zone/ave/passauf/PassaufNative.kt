@@ -310,6 +310,8 @@ data class DocumentDetails(
     val nationality: String? = null,
     val surname: String? = null,
     val givenNames: String? = null,
+    /** The holder's name as EF.DG11 spells it out, when the document carries one. */
+    val fullName: String? = null,
     val sex: String? = null,
     /** YYYY-MM-DD */
     val dateOfBirth: String? = null,
@@ -319,11 +321,20 @@ data class DocumentDetails(
     val personalDetails: List<Detail> = emptyList(),
     val documentDetails: List<Detail> = emptyList(),
 ) {
-    val fullName: String?
-        get() = listOfNotNull(givenNames, surname)
-            .filter { it.isNotBlank() }
-            .joinToString(" ")
-            .ifBlank { null }
+    /**
+     * The name to put in front of someone, DG11's where the document has one.
+     *
+     * The MRZ is the abbreviated copy: it truncates a name that will not fit its rows
+     * and cannot write anything outside its own character set, so a holder whose name
+     * is long or is not spelled in A-Z reads wrong there. DG11 is where the issuer put
+     * the name in full. Most documents have no DG11 at all, hence the fallback.
+     */
+    val displayName: String?
+        get() = fullName?.ifBlank { null }
+            ?: listOfNotNull(givenNames, surname)
+                .filter { it.isNotBlank() }
+                .joinToString(" ")
+                .ifBlank { null }
 }
 
 @Serializable
