@@ -74,17 +74,40 @@ done
 # Real photographs, if there are any. One image per row, with the row it holds in a
 # file of the same name ending .gt.txt:
 #
-#   photos/passport-01.png
-#   photos/passport-01.gt.txt
+#   <dir>/passport-01.png
+#   <dir>/passport-01.gt.txt
 #
 # This is the only measurement that means anything, because it is the only one where
 # the pictures were not drawn by the same code that drew the training set.
-if compgen -G "photos/*.gt.txt" >/dev/null; then
+#
+# The default directory is deliberately outside the repository, and there is no way to
+# point it at one inside. A photograph of a machine readable zone *is* the credential:
+# it carries the document number, date of birth and date of expiry, which are exactly
+# the three fields that derive the key to the chip. Committing one would publish the
+# key to your own passport, and .gitignore is a request rather than a guarantee — one
+# `git add -f`, one editor plugin, one `git stash -u` and it is in the history forever.
+#
+# Keeping the pictures somewhere git cannot reach means the mistake is not available
+# to make. Override with PASSAUF_PHOTOS if you keep them elsewhere.
+PHOTOS="${PASSAUF_PHOTOS:-$HOME/.local/share/passauf/mrz-photos}"
+
+# A path inside the working tree is refused rather than warned about.
+if [ -d "$PHOTOS" ]; then
+    case "$(cd "$PHOTOS" && pwd -P)/" in
+        "$(cd .. && pwd -P)/"*)
+            echo "PASSAUF_PHOTOS points inside the repository: $PHOTOS" >&2
+            echo "These pictures hold the key to a real chip. Keep them out of the tree." >&2
+            exit 1
+            ;;
+    esac
+fi
+
+if compgen -G "$PHOTOS/*.gt.txt" >/dev/null; then
     echo
     echo "=== photographs ==="
     total=0
     exact=0
-    for truth in photos/*.gt.txt; do
+    for truth in "$PHOTOS"/*.gt.txt; do
         base="${truth%.gt.txt}"
         image=$(ls "$base".{png,jpg,jpeg,tif} 2>/dev/null | head -1) || true
         [ -z "${image:-}" ] && continue
@@ -105,6 +128,7 @@ if compgen -G "photos/*.gt.txt" >/dev/null; then
     echo "  $exact of $total rows read exactly."
 else
     echo
-    echo "No photographs in photos/, so every number above is synthetic and flattering."
+    echo "No photographs in $PHOTOS, so every number above is synthetic and flattering:"
+    echo "the model is being asked about pictures drawn the way its training set was."
     echo "Put real ones there as <name>.png plus <name>.gt.txt to find out the truth."
 fi

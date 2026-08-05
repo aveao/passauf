@@ -3,6 +3,7 @@ package zone.ave.passauf.ui
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Matrix
 import android.util.Log
 import android.util.Size
@@ -65,6 +66,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.createBitmap
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import zone.ave.passauf.MrzRecognizer
 import zone.ave.passauf.PassaufNative
@@ -86,6 +88,27 @@ enum class DocumentShape(val label: String, val aspect: Float) {
 
 /** How much of the frame's width the guide takes up. */
 private const val GUIDE_WIDTH_FRACTION = 0.92f
+
+/**
+ * How much wider than the drawn guide the frame is actually read.
+ *
+ * The box is something to aim at, not a promise about where the reading stops. Aiming
+ * is never exact, and a zone lined up a few millimetres off would otherwise have its
+ * first or last character sliced in half by the very edge of the crop.
+ */
+private const val CROP_OVERSHOOT = 0.06f
+
+/**
+ * Blank space put around the crop before it is read, as a share of the crop's height.
+ *
+ * Tesseract reads characters that touch the edge of an image badly — it is looking for
+ * the whitespace a line of print normally sits in, and at the border there is none. Our
+ * training renders all have wide page margins, so the model has never once seen a glyph
+ * flush against an edge; handing it one is asking about a case that was never taught.
+ *
+ * This is why the leftmost characters were the ones coming back wrong.
+ */
+private const val QUIET_BORDER = 0.25f
 
 /**
  * The camera wants a frame with enough pixels across to resolve single characters.
@@ -512,6 +535,28 @@ private fun GuideOverlay(shape: DocumentShape, modifier: Modifier = Modifier) {
  * Deciding which rows are the machine readable zone belongs to the library, where the
  * CLI benefits from it too, and where it can be tested without a camera.
  */
+/**
+ * Sets the crop in a margin of blank paper, which is where print normally sits.
+ *
+ * A recogniser looks for the whitespace around a line of text to find where the line
+ * is and where each character starts. At the edge of an image there is none, so the
+ * first and last characters of a row come back mangled while everything between them
+ * reads perfectly. Every render the model trained on had wide page margins, so a glyph
+ * flush against an edge is a case it was never shown.
+ *
+ * White rather than a sampled colour: an MRZ is dark print on a pale background, and
+ * that is the contrast the model learned.
+ */
+private fun quiet(crop: Bitmap): Bitmap {
+    val margin = (crop.height * QUIET_BORDER).roundToInt().coerceAtLeast(8)
+    val padded = createBitmap(crop.width + margin * 2, crop.height + margin * 2)
+    Canvas(padded).apply {
+        drawColor(android.graphics.Color.WHITE)
+        drawBitmap(crop, margin.toFloat(), margin.toFloat(), null)
+    }
+    return padded
+}
+
 private class MrzAnalyzer(
     private val recognizer: () -> MrzRecognizer?,
     private val shape: () -> DocumentShape,
@@ -546,8 +591,11 @@ private class MrzAnalyzer(
             val displayWidth = if (turned) proxy.height else proxy.width
             val displayHeight = if (turned) proxy.width else proxy.height
 
-            val guideWidth = displayWidth * GUIDE_WIDTH_FRACTION
-            val guideHeight = guideWidth / shape().aspect
+            // Read a little outside the box that is drawn, so a zone lined up slightly
+            // off does not lose a character to the edge of the crop.
+            val guideWidth = displayWidth * GUIDE_WIDTH_FRACTION * (1f + CROP_OVERSHOOT)
+            val guideHeight = (displayWidth * GUIDE_WIDTH_FRACTION / shape().aspect) *
+                (1f + CROP_OVERSHOOT)
 
             // The guide sits in the middle, and a quarter turn keeps a centred rectangle
             // centred, so putting it back into the sensor's own orientation is only a
@@ -578,9 +626,13 @@ private class MrzAnalyzer(
                 return
             }
 
+            val padded = quiet(cropped)
             val lines = try {
-                engine.recognize(cropped)
+                engine.recognize(padded)
             } finally {
+                if (padded !== cropped) {
+                    padded.recycle()
+                }
                 cropped.recycle()
             }
             val result = PassaufNative.parseMrz(lines)
