@@ -121,6 +121,9 @@ class WireFormatTest {
                 "fullName":"ERIKA MARIA MUSTERMANN-SCHMIDT"}""",
         )
         assertEquals("ERIKA MARIA MUSTERMANN-SCHMIDT", fromDg11.displayName)
+        // The zone's shorter copy stays reachable, since the screen shows both once
+        // DG11 has supplied one of them.
+        assertEquals("ERIKA MUSTERMANN", fromDg11.mrzName)
 
         // A document with neither has no name to show, and the screen says so itself.
         assertEquals(null, passaufJson.decodeFromString<DocumentDetails>("{}").displayName)

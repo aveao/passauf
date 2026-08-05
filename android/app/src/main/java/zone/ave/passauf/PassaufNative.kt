@@ -330,11 +330,14 @@ data class DocumentDetails(
      * the name in full. Most documents have no DG11 at all, hence the fallback.
      */
     val displayName: String?
-        get() = fullName?.ifBlank { null }
-            ?: listOfNotNull(givenNames, surname)
-                .filter { it.isNotBlank() }
-                .joinToString(" ")
-                .ifBlank { null }
+        get() = fullName?.ifBlank { null } ?: mrzName
+
+    /** The holder's name as the machine readable zone spells it, given names first. */
+    val mrzName: String?
+        get() = listOfNotNull(givenNames, surname)
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
+            .ifBlank { null }
 }
 
 @Serializable

@@ -416,6 +416,14 @@ private fun IdentityCard(
             DetailRow("Read with", accessSummary(report))
             DetailRow("Chip Authentication", chipAuthenticationSummary(report))
 
+            // Only when the name above came out of DG11, in which case the zone's copy
+            // of it is worth having too: it is truncated to fit and transliterated into
+            // A-Z, and whether the two agree is the sort of thing someone reading a
+            // document against its chip is here to find out. Without a DG11 name the
+            // heading already is the zone's, and this would be the same string twice.
+            if (document.fullName != null) {
+                DetailRow("MRZ Full Name", document.mrzName)
+            }
             DetailRow("Nationality", document.nationality)
             DetailRow("Issuing state", document.issuingState)
             DetailRow("Date of birth", formatDate(document.dateOfBirth))
