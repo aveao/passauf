@@ -7,10 +7,10 @@ lifecycle = "2.9.4"
 composeBom = "2025.11.00"
 serialization = "1.9.0"
 camerax = "1.6.1"
-# The bundled Latin model, which ships inside the APK. Deliberately not
-# play-services-mlkit-text-recognition: that one fetches its model over the
-# network, and this app declares no INTERNET permission.
-mlkitTextRecognition = "16.0.1"
+# Tesseract, running the OCR-B model trained in tesseract-ocrb-passauf/. Apache 2.0,
+# and published only to JitPack, which is why settings.gradle.kts has that repository
+# narrowed to this one group.
+tesseract4android = "4.9.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -31,7 +31,7 @@ androidx-camera-core = { group = "androidx.camera", name = "camera-core", versio
 androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camerax" }
 androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camerax" }
 androidx-camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
-mlkit-text-recognition = { group = "com.google.mlkit", name = "text-recognition", version.ref = "mlkitTextRecognition" }
+tesseract4android = { group = "cz.adaptech.tesseract4android", name = "tesseract4android", version.ref = "tesseract4android" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

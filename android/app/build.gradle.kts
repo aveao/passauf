@@ -78,14 +78,15 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.kotlinx.serialization.json)
 
-    // Reading the MRZ off a document with the camera, so the three fields do not
-    // have to be typed. Both run entirely on device; see AndroidManifest.xml for
-    // why that is a guarantee rather than a promise.
+    // Reading the MRZ off a document with the camera, so the three fields do not have
+    // to be typed. Tesseract runs the OCR-B model in assets/tessdata, trained by the
+    // scripts in tesseract-ocrb-passauf/. Neither library touches the network, and the
+    // manifest makes sure of it rather than trusting them.
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.camera2)
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
-    implementation(libs.mlkit.text.recognition)
+    implementation(libs.tesseract4android)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)

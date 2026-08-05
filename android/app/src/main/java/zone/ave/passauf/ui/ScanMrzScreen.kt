@@ -66,12 +66,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.TextRecognizer
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import zone.ave.passauf.MrzRecognizer
 import zone.ave.passauf.PassaufNative
-import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
 
@@ -404,7 +400,8 @@ private fun Viewfinder(
         }
     }
     val executor = remember { Executors.newSingleThreadExecutor() }
-    val recognizer = remember { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
+    // Opened on the analyser's own thread, because Tesseract has to stay on one.
+    val recognizer = remember { mutableStateOf<MrzRecognizer?>(null) }
     val provider = remember { mutableStateOf<ProcessCameraProvider?>(null) }
     val currentOnFound by rememberUpdatedState(onFound)
     val currentOnDiagnostics by rememberUpdatedState(onDiagnostics)
@@ -442,11 +439,11 @@ private fun Viewfinder(
                 // between what the camera sees and what gets recognised.
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
+            executor.execute { recognizer.value = MrzRecognizer.open(context) }
             analysis.setAnalyzer(
                 executor,
                 MrzAnalyzer(
-                    recognizer = recognizer,
-                    executor = executor,
+                    recognizer = { recognizer.value },
                     shape = shape,
                     onFound = { currentOnFound(it) },
                     onDiagnostics = { currentOnDiagnostics(it) },
@@ -465,7 +462,8 @@ private fun Viewfinder(
         onDispose {
             gone = true
             provider.value?.unbindAll()
-            recognizer.close()
+            // Released on the thread that opened it, then the thread is retired.
+            executor.execute { recognizer.value?.close() }
             executor.shutdown()
         }
     }
@@ -515,8 +513,7 @@ private fun GuideOverlay(shape: DocumentShape, modifier: Modifier = Modifier) {
  * CLI benefits from it too, and where it can be tested without a camera.
  */
 private class MrzAnalyzer(
-    private val recognizer: TextRecognizer,
-    private val executor: Executor,
+    private val recognizer: () -> MrzRecognizer?,
     private val shape: () -> DocumentShape,
     private val onFound: (PassaufNative.ScannedMrz) -> Unit,
     private val onDiagnostics: (ScanDiagnostics) -> Unit,
@@ -528,87 +525,85 @@ private class MrzAnalyzer(
 
     private var framesSeen = 0
 
-    // Reaching for the underlying frame is what ML Kit wants, and CameraX marks that
-    // access experimental rather than gating it behind opt-in.
+    // Reaching for the underlying frame is what the crop below wants, and CameraX marks
+    // that access experimental rather than gating it behind opt-in.
     @ExperimentalGetImage
     override fun analyze(proxy: ImageProxy) {
-        if (proxy.image == null || done) {
-            proxy.close()
-            return
-        }
-
-        framesSeen += 1
-        val startedAt = System.nanoTime()
-        val rotation = proxy.imageInfo.rotationDegrees
-        val turned = rotation == 90 || rotation == 270
-        val displayWidth = if (turned) proxy.height else proxy.width
-        val displayHeight = if (turned) proxy.width else proxy.height
-
-        val guideWidth = displayWidth * GUIDE_WIDTH_FRACTION
-        val guideHeight = guideWidth / shape().aspect
-
-        // The guide sits in the middle, and a quarter turn keeps a centred rectangle
-        // centred, so putting it back into the sensor's own orientation is only a matter
-        // of swapping the sides over.
-        val cropWidth = (if (turned) guideHeight else guideWidth)
-            .roundToInt().coerceIn(1, proxy.width)
-        val cropHeight = (if (turned) guideWidth else guideHeight)
-            .roundToInt().coerceIn(1, proxy.height)
-
-        val cropped = try {
-            val whole = proxy.toBitmap()
-            val piece = Bitmap.createBitmap(
-                whole,
-                (proxy.width - cropWidth) / 2,
-                (proxy.height - cropHeight) / 2,
-                cropWidth,
-                cropHeight,
-                Matrix().apply { postRotate(rotation.toFloat()) },
-                true,
-            )
-            if (piece !== whole) {
-                whole.recycle()
+        // Whatever happens below, the frame has to go back, or the camera stops handing
+        // over new ones and the viewfinder quietly freezes.
+        try {
+            if (proxy.image == null || done) {
+                return
             }
-            piece
-        } catch (error: Exception) {
-            Log.e("passauf", "Could not crop the frame to the guide.", error)
-            proxy.close()
-            return
-        }
+            // Null while the model is still being unpacked, which takes a moment on
+            // first run. Dropping these frames is the whole handling required.
+            val engine = recognizer() ?: return
 
-        // Already turned the right way up by the matrix above, so no rotation is left
-        // for the recogniser to apply.
-        recognizer.process(InputImage.fromBitmap(cropped, 0))
-            .addOnSuccessListener(executor) { text ->
-                if (done) {
-                    return@addOnSuccessListener
-                }
-                val lines = text.textBlocks.flatMap { block -> block.lines }.map { it.text }
-                val result = PassaufNative.parseMrz(lines)
+            framesSeen += 1
+            val startedAt = System.nanoTime()
+            val rotation = proxy.imageInfo.rotationDegrees
+            val turned = rotation == 90 || rotation == 270
+            val displayWidth = if (turned) proxy.height else proxy.width
+            val displayHeight = if (turned) proxy.width else proxy.height
 
-                onDiagnostics(
-                    ScanDiagnostics(
-                        frameWidth = displayWidth,
-                        frameHeight = displayHeight,
-                        analyzedWidth = cropped.width,
-                        analyzedHeight = cropped.height,
-                        framesSeen = framesSeen,
-                        recognizeMillis = (System.nanoTime() - startedAt) / 1_000_000,
-                        lines = lines,
-                        problem = result.problem,
-                    )
+            val guideWidth = displayWidth * GUIDE_WIDTH_FRACTION
+            val guideHeight = guideWidth / shape().aspect
+
+            // The guide sits in the middle, and a quarter turn keeps a centred rectangle
+            // centred, so putting it back into the sensor's own orientation is only a
+            // matter of swapping the sides over.
+            val cropWidth = (if (turned) guideHeight else guideWidth)
+                .roundToInt().coerceIn(1, proxy.width)
+            val cropHeight = (if (turned) guideWidth else guideHeight)
+                .roundToInt().coerceIn(1, proxy.height)
+
+            val cropped = try {
+                val whole = proxy.toBitmap()
+                val piece = Bitmap.createBitmap(
+                    whole,
+                    (proxy.width - cropWidth) / 2,
+                    (proxy.height - cropHeight) / 2,
+                    cropWidth,
+                    cropHeight,
+                    // Turns it the right way up, so nothing downstream has to.
+                    Matrix().apply { postRotate(rotation.toFloat()) },
+                    true,
                 )
-
-                result.mrz?.let { scanned ->
-                    done = true
-                    onFound(scanned)
+                if (piece !== whole) {
+                    whole.recycle()
                 }
+                piece
+            } catch (error: Exception) {
+                Log.e("passauf", "Could not crop the frame to the guide.", error)
+                return
             }
-            // The frame has to be released whatever happened, or the camera stops
-            // handing over new ones.
-            .addOnCompleteListener(executor) {
+
+            val lines = try {
+                engine.recognize(cropped)
+            } finally {
                 cropped.recycle()
-                proxy.close()
             }
+            val result = PassaufNative.parseMrz(lines)
+
+            onDiagnostics(
+                ScanDiagnostics(
+                    frameWidth = displayWidth,
+                    frameHeight = displayHeight,
+                    analyzedWidth = cropWidth,
+                    analyzedHeight = cropHeight,
+                    framesSeen = framesSeen,
+                    recognizeMillis = (System.nanoTime() - startedAt) / 1_000_000,
+                    lines = lines,
+                    problem = result.problem,
+                )
+            )
+
+            result.mrz?.let { scanned ->
+                done = true
+                onFound(scanned)
+            }
+        } finally {
+            proxy.close()
+        }
     }
 }
