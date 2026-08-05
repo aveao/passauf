@@ -370,11 +370,62 @@ pub fn parse_mrz_sex(sex: char) -> String {
     };
 }
 
+/// Document codes that mean something particular to the state that issued them.
+///
+/// The second character is the issuer's to choose, so the same two letters land on
+/// different documents depending on who printed them: PS is a 1954 Convention travel
+/// document from Belgium, a travel document for foreigners from Italy, and a passport
+/// for foreigners from Switzerland. Nothing but the pair decides it, which is why this
+/// is a table of pairs rather than a rule.
+///
+/// Anything not listed falls through to the general rules below, so an unknown PS is
+/// still reported as a passport rather than as nothing at all.
+const ISSUER_SPECIFIC_CODES: &[(&str, &str, &str)] = &[
+    ("AUT", "PF", "Alien's Passport"),
+    ("BEL", "PS", "1954 Convention Travel Document"),
+    ("CHE", "PS", "Passport for Foreigners"),
+    ("CZE", "PC", "Alien's Passport"),
+    ("CZE", "PU", "1951 Convention Travel Document"),
+    ("ESP", "DV", "Travel Document"),
+    ("HRV", "PI", "Travel Document"),
+    ("IRL", "PB", "Travel Document"),
+    ("ISL", "PF", "1951 Convention Travel Document"),
+    ("ISL", "PU", "Alien's Passport"),
+    ("ITA", "PA", "1954 Convention Travel Document"),
+    ("ITA", "PS", "Travel Document for Foreigners"),
+    ("LTU", "PA", "1954 Convention Travel Document"),
+    ("LTU", "PP", "1951 Convention Travel Document"),
+    ("LTU", "PU", "Alien's Passport"),
+    (
+        "LVA",
+        "PA",
+        "Travel Document (Subsidiary Protection Status)",
+    ),
+    ("LVA", "PB", "Stateless Person Travel Document"),
+    ("LVA", "PN", "Alien's Passport"),
+    ("LVA", "PP", "Refugee Travel Document"),
+    ("NOR", "PU", "Alien's Passport"),
+    ("POL", "PC", "1951 Convention Travel Document"),
+    ("POL", "PG", "1951 Convention Travel Document"),
+    ("POL", "PP", "Travel Document for an Alien"),
+    ("SVK", "PA", "1954 Convention Travel Document"),
+    ("SVK", "PB", "1951 Convention Travel Document"),
+    ("SVK", "PC", "Alien's Passport"),
+];
+
 pub fn parse_mrz_document_code(document_code: &String, country_code: &String) -> String {
     // https://wf.lavatech.top/aves-tech-notes/emrtd-data-quirks see document type codes
     if document_code.len() != 2 {
         return document_code.to_string();
     }
+    // Who printed it settles it, where the pair is known.
+    if let Some((_, _, description)) = ISSUER_SPECIFIC_CODES
+        .iter()
+        .find(|(state, code, _)| *state == country_code && *code == document_code)
+    {
+        return description.to_string();
+    }
+
     // ICAO 9303 part 5, edition 8, 4.2.2.3 Note k:
     // "The first character shall be A, C or I. Historically these three characters were chosen for their ease of
     // recognition in the OCR-B character set. The second character shall be at the discretion of the issuing State or
@@ -400,9 +451,10 @@ pub fn parse_mrz_document_code(document_code: &String, country_code: &String) ->
             return "Passport Card".to_string();
         }
         "PT" => {
-            if country_code == "D" {
-                return "Travel Document".to_string();
-            }
+            return "Travel Document".to_string();
+        }
+        "PR" => {
+            return "1951 Convention Travel Document".to_string();
         }
         "AD" | "AR" | "CR" | "IR" | "IT" | "RP" | "RT" => {
             return "Residence Permit Card".to_string();
@@ -542,22 +594,46 @@ where
 mod tests {
     use super::*;
 
-    /// Germany writes its issuing state as one letter where the field holds three, and
-    /// the caller strips the filler before this sees it, so the code to match is "D".
+    fn code(document_code: &str, country_code: &str) -> String {
+        return parse_mrz_document_code(&document_code.to_string(), &country_code.to_string());
+    }
+
+    /// PT and PR mean the same thing wherever they come from.
     #[test]
-    fn a_german_pt_is_a_travel_document() {
+    fn some_codes_do_not_depend_on_who_issued_them() {
+        assert_eq!(code("PT", "D"), "Travel Document");
+        assert_eq!(code("PT", "UTO"), "Travel Document");
+        assert_eq!(code("PR", "D"), "1951 Convention Travel Document");
+        assert_eq!(code("PR", "SVK"), "1951 Convention Travel Document");
+        // An ordinary passport is still an ordinary passport.
+        assert_eq!(code("P<", "D"), "Passport");
+    }
+
+    /// The second character belongs to the issuer, so the same pair of letters is three
+    /// different documents depending on who printed them.
+    #[test]
+    fn the_same_code_means_different_things_by_issuer() {
+        assert_eq!(code("PS", "BEL"), "1954 Convention Travel Document");
+        assert_eq!(code("PS", "ITA"), "Travel Document for Foreigners");
+        assert_eq!(code("PS", "CHE"), "Passport for Foreigners");
+        // Nobody else has claimed PS, so it falls back to being a passport rather than
+        // to nothing at all.
+        assert_eq!(code("PS", "UTO"), "Passport");
+
+        assert_eq!(code("PA", "ITA"), "1954 Convention Travel Document");
         assert_eq!(
-            parse_mrz_document_code(&"PT".to_string(), &"D".to_string()),
-            "Travel Document"
+            code("PA", "LVA"),
+            "Travel Document (Subsidiary Protection Status)"
         );
-        assert_eq!(
-            parse_mrz_document_code(&"P<".to_string(), &"D".to_string()),
-            "Passport"
-        );
-        assert_eq!(
-            parse_mrz_document_code(&"PT".to_string(), &"UTO".to_string()),
-            "Passport"
-        );
+        assert_eq!(code("PU", "CZE"), "1951 Convention Travel Document");
+        assert_eq!(code("PU", "NOR"), "Alien's Passport");
+    }
+
+    /// Spain's is the one entry that does not begin with P, so it would reach none of
+    /// the general rules on its own.
+    #[test]
+    fn an_issuer_code_that_is_not_a_passport_still_resolves() {
+        assert_eq!(code("DV", "ESP"), "Travel Document");
     }
 
     /// A marker of X and an unfilled field arrive as different characters and mean
