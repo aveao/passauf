@@ -396,6 +396,11 @@ pub fn parse_mrz_document_code(document_code: &String, country_code: &String) ->
         "IP" => {
             return "Passport Card".to_string();
         }
+        "PT" => {
+            if country_code == "D" {
+                return "Travel Document".to_string();
+            }
+        }
         "AD" | "AR" | "CR" | "IR" | "IT" | "RP" | "RT" => {
             return "Residence Permit Card".to_string();
         }
@@ -533,6 +538,24 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Germany writes its issuing state as one letter where the field holds three, and
+    /// the caller strips the filler before this sees it, so the code to match is "D".
+    #[test]
+    fn a_german_pt_is_a_travel_document() {
+        assert_eq!(
+            parse_mrz_document_code(&"PT".to_string(), &"D".to_string()),
+            "Travel Document"
+        );
+        assert_eq!(
+            parse_mrz_document_code(&"P<".to_string(), &"D".to_string()),
+            "Passport"
+        );
+        assert_eq!(
+            parse_mrz_document_code(&"PT".to_string(), &"UTO".to_string()),
+            "Passport"
+        );
+    }
 
     /// Build the ISO/IEC 19794-5:2005 face record around some image bytes.
     ///
