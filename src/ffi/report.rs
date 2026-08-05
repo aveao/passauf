@@ -491,6 +491,57 @@ fn personal_details(dg11: &types::EFDG11) -> Vec<Detail> {
     return details;
 }
 
+/// What the machine readable zone says, field by field.
+///
+/// The same fields the document block at the top of the app already carries, and
+/// deliberately so: there they are the document's details, gathered from wherever they
+/// came from. Here they are this file's contents, next to the rows they were read out
+/// of, so EF.DG1 can be checked on its own terms — which of those forty-four characters
+/// became the date of birth is not something anyone should have to count out by hand.
+fn mrz_details(mrz: &types::MRZ) -> Vec<Detail> {
+    let mut document = DocumentReport::default();
+    fill_from_mrz(&mut document, mrz);
+
+    let mut details = vec![];
+    details.extend(Detail::optional("Format", &document.mrz_format));
+    details.extend(Detail::optional("Document code", &document.document_code));
+    details.extend(Detail::optional("Document type", &document.document_type));
+    details.extend(Detail::optional(
+        "Document number",
+        &document.document_number,
+    ));
+    details.extend(Detail::optional("Issuing state", &document.issuing_state));
+    details.extend(Detail::optional("Nationality", &document.nationality));
+    details.extend(Detail::optional("Surname", &document.surname));
+    details.extend(Detail::optional("Given names", &document.given_names));
+    details.extend(Detail::optional("Legal Sex Marker", &document.sex));
+    details.extend(Detail::optional("Date of birth", &document.date_of_birth));
+    details.extend(Detail::optional("Date of expiry", &document.date_of_expiry));
+    details.extend(Detail::optional("Optional data", &document.optional_data));
+
+    // Which check digit failed, rather than only that one did: they cover different
+    // fields, and a document number that does not add up means something quite
+    // different from a composite that does not.
+    let valid = mrz.validate_check_digits(false);
+    let failed: Vec<&str> = mrz
+        .check_digit_names()
+        .iter()
+        .zip(valid.iter())
+        .filter(|(_, valid)| !**valid)
+        .map(|(name, _)| *name)
+        .collect();
+    details.push(Detail::new(
+        "Check digits",
+        if failed.is_empty() {
+            format!("All {} valid", valid.len())
+        } else {
+            format!("Wrong: {}", failed.join(", "))
+        },
+    ));
+
+    return details;
+}
+
 fn document_details(dg12: &types::EFDG12) -> Vec<Detail> {
     let mut details = vec![];
     details.extend(Detail::optional(
@@ -568,11 +619,10 @@ fn details(parsed: &ParsedDataGroup) -> Vec<Detail> {
             }
         }
         ParsedDataGroup::EFDG1(dg1) => {
-            // DG1's contents are the MRZ, which the document block already covers
-            // field by field. The zone itself is still worth showing, laid out in the
-            // rows it is printed as rather than as one run of characters, so it can be
-            // read against the document.
+            // The zone laid out in the rows it is printed as rather than as one run of
+            // characters, so it can be read against the document in someone's hand.
             details.push(Detail::new("MRZ", dg1.mrz.rows().join("\n")));
+            details.extend(mrz_details(&dg1.mrz));
         }
         ParsedDataGroup::EFDG2_3_4(biometrics) => {
             for (index, biometric) in biometrics.biometrics.iter().enumerate() {
@@ -872,5 +922,31 @@ mod tests {
         assert_eq!(document.date_of_expiry, Some("2012-04-15".to_string()));
         assert_eq!(document.sex, Some("Female".to_string()));
         assert_eq!(document.mrz_format, Some("TD3".to_string()));
+    }
+
+    /// EF.DG1 shows the zone and what was read out of it, side by side.
+    #[test]
+    fn spells_out_what_the_zone_says() {
+        let mrz = types::MRZ::deserialize(
+            &"P<UTOMUSTERMANN<<ERIKA<<<<<<<<<<<<<<<<<<<<<<\
+              L898902C36UTO7408122F1204159ZE184226B<<<<<10"
+                .to_string(),
+        )
+        .unwrap();
+        let details = mrz_details(&mrz);
+        let row = |label: &str| {
+            details
+                .iter()
+                .find(|detail| detail.label == label)
+                .map(|detail| detail.value.clone())
+        };
+
+        assert_eq!(row("Document number"), Some("L898902C3".to_string()));
+        assert_eq!(row("Surname"), Some("MUSTERMANN".to_string()));
+        assert_eq!(row("Given names"), Some("ERIKA".to_string()));
+        assert_eq!(row("Date of birth"), Some("1974-08-12".to_string()));
+        assert_eq!(row("Check digits"), Some("All 5 valid".to_string()));
+        // The zone itself is not one of these rows; the caller adds it above them.
+        assert_eq!(row("MRZ"), None);
     }
 }
