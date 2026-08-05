@@ -90,9 +90,15 @@ impl EFCardAccess {
 /// something about itself, and printing a bare `0.4.0.127.0.7.2.2.2` at someone amounts
 /// to withholding it.
 ///
-/// Taken from the ASN.1 in the standards rather than typed out: TR-03110 Part 3 Annex A
+/// Taken from the ASN.1 in the standards rather than typed out: TR-03110 Parts 2 and 3
 /// for `bsi-de`, ICAO 9303 Part 11 for the PACE-CAM branch it adds to that tree, and
 /// Doc 9303-10 for ICAO's own arc.
+///
+/// The standards do not write these consistently, which is worth knowing before trusting
+/// any sweep of them. The Pseudonymous Signature hash variants name their parent without
+/// its `id-` prefix — `{ PSA-ECDH-ECSchnorr 3 }` — and `id-PS-PK` reaches its arc by
+/// spelling it out, `{ bsi-de protocols(2) smartcards(2) PK(1) 3 }`. Both forms slip
+/// past a reader expecting the usual one.
 ///
 /// Kept to what a document can name. TR-03110's auxiliary data identifiers under
 /// `applications(3)` are left out, being what a terminal sends rather than what a chip
@@ -101,6 +107,10 @@ const BSI_PROTOCOL_OIDS: &[(&str, &str)] = &[
     ("0.4.0.127.0.7.2.2.1", "id-PK"),
     ("0.4.0.127.0.7.2.2.1.1", "id-PK-DH"),
     ("0.4.0.127.0.7.2.2.1.2", "id-PK-ECDH"),
+    // Written { bsi-de protocols(2) smartcards(2) PK(1) 3 } in Part 3, which names the
+    // arc it passes through rather than reaching id-PK by name.
+    ("0.4.0.127.0.7.2.2.1.3", "id-PS-PK"),
+    ("0.4.0.127.0.7.2.2.1.3.2", "id-PS-PK-ECDH-ECSchnorr"),
     ("0.4.0.127.0.7.2.2.2", "id-TA"),
     ("0.4.0.127.0.7.2.2.2.1", "id-TA-RSA"),
     ("0.4.0.127.0.7.2.2.2.1.1", "id-TA-RSA-v1-5-SHA-1"),
@@ -200,10 +210,46 @@ const BSI_PROTOCOL_OIDS: &[(&str, &str)] = &[
     ("0.4.0.127.0.7.2.2.11", "id-PS"),
     ("0.4.0.127.0.7.2.2.11.1", "id-PSA"),
     ("0.4.0.127.0.7.2.2.11.1.2", "id-PSA-ECDH-ECSchnorr"),
+    (
+        "0.4.0.127.0.7.2.2.11.1.2.3",
+        "id-PSA-ECDH-ECSchnorr-SHA-256",
+    ),
+    (
+        "0.4.0.127.0.7.2.2.11.1.2.4",
+        "id-PSA-ECDH-ECSchnorr-SHA-384",
+    ),
+    (
+        "0.4.0.127.0.7.2.2.11.1.2.5",
+        "id-PSA-ECDH-ECSchnorr-SHA-512",
+    ),
     ("0.4.0.127.0.7.2.2.11.2", "id-PSM"),
     ("0.4.0.127.0.7.2.2.11.2.2", "id-PSM-ECDH-ECSchnorr"),
+    (
+        "0.4.0.127.0.7.2.2.11.2.2.3",
+        "id-PSM-ECDH-ECSchnorr-SHA-256",
+    ),
+    (
+        "0.4.0.127.0.7.2.2.11.2.2.4",
+        "id-PSM-ECDH-ECSchnorr-SHA-384",
+    ),
+    (
+        "0.4.0.127.0.7.2.2.11.2.2.5",
+        "id-PSM-ECDH-ECSchnorr-SHA-512",
+    ),
     ("0.4.0.127.0.7.2.2.11.3", "id-PSC"),
     ("0.4.0.127.0.7.2.2.11.3.2", "id-PSC-ECDH-ECSchnorr"),
+    (
+        "0.4.0.127.0.7.2.2.11.3.2.3",
+        "id-PSC-ECDH-ECSchnorr-SHA-256",
+    ),
+    (
+        "0.4.0.127.0.7.2.2.11.3.2.4",
+        "id-PSC-ECDH-ECSchnorr-SHA-384",
+    ),
+    (
+        "0.4.0.127.0.7.2.2.11.3.2.5",
+        "id-PSC-ECDH-ECSchnorr-SHA-512",
+    ),
     ("0.4.0.127.0.7.2.2.12", "id-PasswordType"),
     ("0.4.0.127.0.7.2.2.12.1", "id-MRZ"),
     ("0.4.0.127.0.7.2.2.12.2", "id-CAN"),
@@ -405,6 +451,25 @@ mod tests {
         assert_eq!(
             describe_protocol_oid("2.23.136.1.1.1"),
             Some("ICAO (id-icao-mrtd-security-ldsSecurityObject)".to_string())
+        );
+    }
+
+    /// Off a real document, and missed on the first sweep because Part 3 writes the
+    /// parent of these without its id- prefix.
+    #[test]
+    fn names_the_pseudonymous_signature_variants() {
+        assert_eq!(
+            describe_protocol_oid("0.4.0.127.0.7.2.2.11.1.2.3"),
+            Some("Pseudonymous signature (id-PSA-ECDH-ECSchnorr-SHA-256)".to_string())
+        );
+        assert_eq!(
+            describe_protocol_oid("0.4.0.127.0.7.2.2.11.3.2.5"),
+            Some("Pseudonymous signature (id-PSC-ECDH-ECSchnorr-SHA-512)".to_string())
+        );
+        // Reached by spelling its arc out rather than by naming id-PK.
+        assert_eq!(
+            describe_protocol_oid("0.4.0.127.0.7.2.2.1.3.2"),
+            Some("Chip Authentication public key (id-PS-PK-ECDH-ECSchnorr)".to_string())
         );
     }
 

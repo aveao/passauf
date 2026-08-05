@@ -593,8 +593,13 @@ fn details(parsed: &ParsedDataGroup) -> Vec<Detail> {
         ParsedDataGroup::EFCardAccess(card_access) => {
             for security_info in card_access.security_infos.iter() {
                 match security_info {
+                    // Every entry reads the same way: what it is, then the identifier
+                    // it said so with. Two lines also puts it under its label rather
+                    // than beside it, which a dotted OID needs the width for.
                     types::ef_cardaccess::SecurityInfo::Pace(pace_info) => {
-                        details.push(Detail::new("PACE", pace_info.to_string()))
+                        let oid =
+                            types::ef_cardaccess::format_oid(&pace_info.algorithm.to_oid_bytes());
+                        details.push(Detail::new("PACE", format!("{}\n{}", pace_info, oid)));
                     }
                     types::ef_cardaccess::SecurityInfo::Unknown(unknown) => {
                         let oid = types::ef_cardaccess::format_oid(&unknown.protocol);
@@ -602,7 +607,7 @@ fn details(parsed: &ParsedDataGroup) -> Vec<Detail> {
                         // identifier itself, so nothing is taken on trust.
                         let value = match types::ef_cardaccess::describe_protocol_oid(&oid) {
                             Some(name) => format!("{}\n{}", name, oid),
-                            None => oid,
+                            None => format!("Unrecognised protocol\n{}", oid),
                         };
                         details.push(Detail::new("Other", value));
                     }
