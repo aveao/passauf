@@ -422,13 +422,13 @@ private fun IdentityCard(
             // document against its chip is here to find out. Without a DG11 name the
             // heading already is the zone's, and this would be the same string twice.
             if (document.fullName != null) {
-                DetailRow("MRZ Full Name", document.mrzName)
+                DetailRow("MRZ full name", document.mrzName)
             }
             DetailRow("Nationality", document.nationality)
             DetailRow("Issuing state", document.issuingState)
             DetailRow("Date of birth", formatDate(document.dateOfBirth))
             DetailRow("Date of expiry", formatDate(document.dateOfExpiry))
-            DetailRow("Legal Sex Marker", document.sex)
+            DetailRow("Legal sex marker", document.sex)
             DetailRow("Optional data", document.optionalData)
             DetailRow("MRZ format", document.mrzFormat)
             document.mrzChecksumsValid?.let { valid ->

@@ -537,7 +537,7 @@ fn mrz_details(mrz: &types::MRZ) -> Vec<Detail> {
     details.extend(Detail::optional("Nationality", &document.nationality));
     details.extend(Detail::optional("Surname", &document.surname));
     details.extend(Detail::optional("Given names", &document.given_names));
-    details.extend(Detail::optional("Legal Sex Marker", &document.sex));
+    details.extend(Detail::optional("Legal sex marker", &document.sex));
     details.extend(Detail::optional("Date of birth", &document.date_of_birth));
     details.extend(Detail::optional("Date of expiry", &document.date_of_expiry));
     details.extend(Detail::optional("Optional data", &document.optional_data));
