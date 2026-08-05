@@ -86,17 +86,22 @@ enum class DocumentShape(val label: String, val aspect: Float) {
     Card("ID / licence", 5f),
 }
 
-/** How much of the frame's width the guide takes up. */
-private const val GUIDE_WIDTH_FRACTION = 0.92f
+/** How much of the frame's width is read, whatever the guide happens to show. */
+private const val ANALYSIS_WIDTH_FRACTION = 0.975f
 
 /**
- * How much wider than the drawn guide the frame is actually read.
+ * How much of the read region the drawn box covers.
  *
- * The box is something to aim at, not a promise about where the reading stops. Aiming
- * is never exact, and a zone lined up a few millimetres off would otherwise have its
- * first or last character sliced in half by the very edge of the crop.
+ * Deliberately well under one. The box is something to aim at, not a promise about
+ * where reading stops, so a zone that fills it sits comfortably inside what is
+ * actually looked at, with document either side of it.
+ *
+ * That margin is the point rather than a tolerance for bad aim. A recogniser finds a
+ * line, and the breaks between its characters, from the whitespace around the print;
+ * a zone crammed edge to edge gives it none, and the first and last characters come
+ * back wrong while everything between them reads perfectly.
  */
-private const val CROP_OVERSHOOT = 0.06f
+private const val GUIDE_FILL = 0.78f
 
 /**
  * Blank space put around the crop before it is read, as a share of the crop's height.
@@ -503,8 +508,10 @@ private fun GuideOverlay(shape: DocumentShape, modifier: Modifier = Modifier) {
             compositingStrategy = CompositingStrategy.Offscreen
         }
     ) {
-        val width = size.width * GUIDE_WIDTH_FRACTION
-        val height = width / shape.aspect
+        // Drawn smaller than the region actually read, by GUIDE_FILL. Both are centred
+        // on the frame, so the slack ends up evenly on all four sides.
+        val width = size.width * ANALYSIS_WIDTH_FRACTION * GUIDE_FILL
+        val height = (size.width * ANALYSIS_WIDTH_FRACTION / shape.aspect) * GUIDE_FILL
         val topLeft = Offset((size.width - width) / 2f, (size.height - height) / 2f)
         val guide = androidx.compose.ui.geometry.Size(width, height)
 
@@ -591,18 +598,17 @@ private class MrzAnalyzer(
             val displayWidth = if (turned) proxy.height else proxy.width
             val displayHeight = if (turned) proxy.width else proxy.height
 
-            // Read a little outside the box that is drawn, so a zone lined up slightly
-            // off does not lose a character to the edge of the crop.
-            val guideWidth = displayWidth * GUIDE_WIDTH_FRACTION * (1f + CROP_OVERSHOOT)
-            val guideHeight = (displayWidth * GUIDE_WIDTH_FRACTION / shape().aspect) *
-                (1f + CROP_OVERSHOOT)
+            // What gets read, which is a good deal larger than the box on screen. The
+            // guide only says where to put the zone.
+            val analysisWidth = displayWidth * ANALYSIS_WIDTH_FRACTION
+            val analysisHeight = analysisWidth / shape().aspect
 
-            // The guide sits in the middle, and a quarter turn keeps a centred rectangle
+            // The region sits in the middle, and a quarter turn keeps a centred rectangle
             // centred, so putting it back into the sensor's own orientation is only a
             // matter of swapping the sides over.
-            val cropWidth = (if (turned) guideHeight else guideWidth)
+            val cropWidth = (if (turned) analysisHeight else analysisWidth)
                 .roundToInt().coerceIn(1, proxy.width)
-            val cropHeight = (if (turned) guideWidth else guideHeight)
+            val cropHeight = (if (turned) analysisWidth else analysisHeight)
                 .roundToInt().coerceIn(1, proxy.height)
 
             val cropped = try {
