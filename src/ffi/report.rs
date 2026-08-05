@@ -689,6 +689,30 @@ mod tests {
     /// The exact key names the Android app decodes. A rename on this side
     /// without one on that side leaves the app silently reading defaults,
     /// which is how readBinaryFiles went missing in the first place.
+    /// What the app is actually handed for a read opened from a file.
+    ///
+    /// The library checks the data groups against the security object beside them and
+    /// says so in the log, so anything the app fails to act on has gone missing between
+    /// there and here.
+    #[test]
+    fn an_import_reports_its_integrity_check() {
+        use sha2::Digest;
+        let dg1 = b"\x61\x0BP<UTOTEST".to_vec();
+        let digest = sha2::Sha256::digest(&dg1).to_vec();
+        let files = vec![
+            ("X-EF_DG1.bin".to_string(), dg1),
+            (
+                "X-EF_SOD.bin".to_string(),
+                crate::session::import_tests::sod_over(&[(1, digest)]),
+            ),
+        ];
+        let read = crate::session::read_from_files(&files, None);
+        let json = serde_json::to_string(&build(&read, vec![])).unwrap();
+
+        assert!(json.contains("\"securityObjectRead\":true"), "{}", json);
+        assert!(json.contains("\"checked\":[1]"), "{}", json);
+    }
+
     #[test]
     fn serializes_the_keys_the_app_expects() {
         let report = Report {

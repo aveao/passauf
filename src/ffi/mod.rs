@@ -354,9 +354,17 @@ pub extern "system" fn Java_zone_ave_passauf_PassaufNative_nativeReadFiles<'loca
         }
     }
 
+    // Beside the files themselves, which is where the app unpacked them and where
+    // anything pulled back out of them belongs.
+    let directory = files
+        .first()
+        .and_then(|(path, _)| PathBuf::from(path).parent().map(PathBuf::from));
+
     // Same guard as the read above: the parsers below assert in places, and a file
     // someone hand-edited is exactly the sort of input that finds one.
-    let outcome = catch_unwind(AssertUnwindSafe(|| session::read_from_files(&files)));
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        session::read_from_files(&files, directory.as_deref())
+    }));
     let log = logger::take_capture();
 
     let report = match outcome {

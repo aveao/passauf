@@ -7,7 +7,7 @@
 /// something else with the result.
 use simplelog::{error, info, warn};
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::iso7816;
 use crate::secure_messaging::SecureMessaging;
@@ -710,7 +710,7 @@ where
 /// data groups are hashed and held against the EF.SOD sitting beside them. That is a
 /// property of the archive itself and needs no document present. It shows the set is
 /// internally consistent — the same thing it shows after a live read, and no more.
-pub fn read_from_files(files: &[(String, Vec<u8>)]) -> DocumentRead {
+pub fn read_from_files(files: &[(String, Vec<u8>)], dump_path: Option<&Path>) -> DocumentRead {
     let mut reads: Vec<FileRead> = vec![];
     let mut warnings: Vec<String> = vec![];
 
@@ -727,6 +727,29 @@ pub fn read_from_files(files: &[(String, Vec<u8>)]) -> DocumentRead {
         let parsed = data
             .as_ref()
             .and_then(|bytes| (dg_info.parser)(bytes, dg_info, false));
+
+        // The pictures a data group carries are not sitting in it ready to look at;
+        // they come out of it, and everything downstream — the portrait, a file's image
+        // strip — is a list of paths to ones that have been pulled out. So the same
+        // dumpers run here as after a live read, writing beside the files they came
+        // from and under the same names, which is what the archive already held.
+        let mut dumped = vec![];
+        if let (Some(dump_path), Some(file_data)) = (dump_path, &data) {
+            let source = files
+                .iter()
+                .find(|(name, _)| file_stem_names(name) == wanted)
+                .map(|(name, _)| name.as_str())
+                .unwrap_or(dg_info.name);
+            let base = Path::new(source)
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+                .unwrap_or_else(|| dg_info.name.replace(".", "_"));
+            match (dg_info.dumper)(file_data, &parsed, dump_path, &base) {
+                Ok(paths) => dumped = paths,
+                Err(error) => warn!("Could not write {} out again: {}", dg_info.name, error),
+            }
+        }
+
         reads.push(FileRead {
             name: dg_info.name,
             description: dg_info.description,
@@ -734,7 +757,7 @@ pub fn read_from_files(files: &[(String, Vec<u8>)]) -> DocumentRead {
             data,
             parsed,
             hash: HashCheck::NoSecurityObject,
-            dumped: vec![],
+            dumped,
         });
     }
 
@@ -754,6 +777,13 @@ pub fn read_from_files(files: &[(String, Vec<u8>)]) -> DocumentRead {
             .map(|security_object| security_object.hash_algorithm.to_string()),
         ..Default::default()
     };
+
+    if security_object.is_some() {
+        // EF.COM, EF.CardAccess and EF.SOD itself are not covered by EF.SOD, and saying
+        // "no security object" about them when there plainly is one reads as a failure
+        // rather than as the nothing it is. The live path does the same.
+        mark_files_read_before_the_security_object(&mut reads);
+    }
 
     if let Some(ref security_object) = security_object {
         for file in reads.iter_mut() {
@@ -1190,5 +1220,138 @@ mod tests {
             data_group_tag_list: vec![0x61, 0x75],
         };
         assert!(data_groups_missing_from_ef_com(&ef_com, &sod).is_empty());
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod import_tests {
+    use super::*;
+    use crate::helpers::encode_ber;
+    use sha2::Digest;
+
+    fn ber(tag: u8, body: &[u8]) -> Vec<u8> {
+        return encode_ber(&[tag], &body.to_vec());
+    }
+
+    /// The smallest EF.SOD that names a hash algorithm and one data group hash.
+    pub(crate) fn sod_over(hashes: &[(u8, Vec<u8>)]) -> Vec<u8> {
+        let mut entries = vec![];
+        for (number, hash) in hashes {
+            entries.extend(ber(
+                0x30,
+                &[ber(0x02, &[*number]), ber(0x04, hash)].concat(),
+            ));
+        }
+        let lds = ber(
+            0x30,
+            &[
+                ber(0x02, &[0x00]),
+                // SHA-256
+                ber(
+                    0x30,
+                    &ber(
+                        0x06,
+                        &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01],
+                    ),
+                ),
+                ber(0x30, &entries),
+            ]
+            .concat(),
+        );
+        let encap = ber(
+            0x30,
+            &[
+                ber(0x06, &crate::dg_parsers::cms::OID_LDS_SECURITY_OBJECT),
+                ber(0xA0, &ber(0x04, &lds)),
+            ]
+            .concat(),
+        );
+        let signed = ber(0x30, &[ber(0x02, &[0x03]), ber(0x31, &[]), encap].concat());
+        let content = ber(
+            0x30,
+            &[
+                ber(
+                    0x06,
+                    &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x07, 0x02],
+                ),
+                ber(0xA0, &signed),
+            ]
+            .concat(),
+        );
+        return ber(0x77, &content);
+    }
+
+    /// A read off a disk checks its data groups against the security object beside them,
+    /// exactly as a read off a chip does. That check is about the files, so it survives
+    /// being carried around in an archive; the session it was first read over does not.
+    #[test]
+    fn an_imported_read_is_checked_against_its_own_security_object() {
+        let dg1 = b"\x61\x0BP<UTOTEST".to_vec();
+        let digest = sha2::Sha256::digest(&dg1).to_vec();
+        let files = vec![
+            ("X-EF_DG1.bin".to_string(), dg1),
+            ("X-EF_SOD.bin".to_string(), sod_over(&[(1, digest)])),
+        ];
+
+        let read = read_from_files(&files, None);
+
+        assert!(
+            read.integrity.security_object_read,
+            "the security object beside the files was not found"
+        );
+        assert_eq!(read.integrity.hash_algorithm, Some("SHA-256".to_string()));
+        assert_eq!(read.integrity.checked, vec![1]);
+        assert!(read.integrity.mismatched.is_empty());
+        assert!(matches!(
+            read.file("EF.DG1").unwrap().hash,
+            HashCheck::Matches
+        ));
+        // Nothing about a session, because there was none.
+        assert!(read.authentication.is_none());
+    }
+
+    /// The app hands over absolute paths out of its own cache, and the directories on
+    /// the way there carry dots and dashes of their own.
+    #[test]
+    fn finds_the_data_group_in_a_real_path() {
+        assert_eq!(file_stem_names("X-EF_DG1.bin"), "EF_DG1");
+        assert_eq!(
+            file_stem_names(
+                "/data/user/0/zone.ave.passauf/cache/documents/1754-imported/L898902C3-EF_SOD.bin"
+            ),
+            "EF_SOD"
+        );
+        // A document number with a dash in it must not take the name with it.
+        assert_eq!(file_stem_names("/tmp/AB-12-EF_DG11.bin"), "EF_DG11");
+        // And EF_DG1 must not answer for EF_DG11.
+        assert_ne!(file_stem_names("/tmp/X-EF_DG11.bin"), "EF_DG1");
+    }
+
+    /// EF.SOD does not cover itself or EF.COM, and calling that "no security object"
+    /// when one is right there reads as a failure rather than as the nothing it is.
+    #[test]
+    fn files_the_security_object_does_not_cover_say_so() {
+        let dg1 = b"\x61\x0BP<UTOTEST".to_vec();
+        let digest = sha2::Sha256::digest(&dg1).to_vec();
+        let files = vec![
+            ("X-EF_DG1.bin".to_string(), dg1),
+            ("X-EF_SOD.bin".to_string(), sod_over(&[(1, digest)])),
+        ];
+        let read = read_from_files(&files, None);
+        assert_eq!(read.file("EF.SOD").unwrap().hash, HashCheck::NotCovered);
+        assert_eq!(read.file("EF.DG1").unwrap().hash, HashCheck::Matches);
+    }
+
+    /// An archive someone edited has to fail the same way a tampered chip would.
+    #[test]
+    fn an_altered_data_group_still_fails() {
+        let digest = sha2::Sha256::digest(b"\x61\x0BP<UTOTEST".to_vec()).to_vec();
+        let files = vec![
+            ("X-EF_DG1.bin".to_string(), b"\x61\x0BP<UTOELSE".to_vec()),
+            ("X-EF_SOD.bin".to_string(), sod_over(&[(1, digest)])),
+        ];
+
+        let read = read_from_files(&files, None);
+        assert_eq!(read.integrity.mismatched, vec![1]);
     }
 }
