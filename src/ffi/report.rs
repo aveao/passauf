@@ -103,7 +103,8 @@ pub struct FileReport {
     /// Whether the document had this file at all.
     pub present: bool,
     pub size: usize,
-    /// "noSecurityObject", "notCovered", "matches" or "mismatch".
+    /// "notApplicable", "noSecurityObject", "notCovered", "matches" or
+    /// "mismatch".
     pub hash_status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expected_hash: Option<String>,
@@ -267,6 +268,16 @@ fn integrity(integrity: &Integrity) -> IntegrityReport {
 
 fn file(file: &FileRead) -> FileReport {
     let (hash_status, expected_hash, actual_hash) = match &file.hash {
+        // For a file EF.SOD could never cover there is no check to have gone
+        // missing, and saying one "was not checked" invites the reader to
+        // wonder what went wrong when the answer is that nothing was ever
+        // meant to happen. Kept apart from notCovered, which is a real absence:
+        // a data group EF.SOD *could* have recorded a hash for and did not.
+        HashCheck::NoSecurityObject | HashCheck::NotCovered
+            if !covered_by_security_object(file) =>
+        {
+            ("notApplicable", None, None)
+        }
         HashCheck::NoSecurityObject => ("noSecurityObject", None, None),
         HashCheck::NotCovered => ("notCovered", None, None),
         HashCheck::Matches => ("matches", None, None),
@@ -318,6 +329,18 @@ fn portraits(read: &DocumentRead) -> Vec<String> {
         }
     }
     return portraits;
+}
+
+/// Whether EF.SOD could hold a hash for this file at all.
+///
+/// It covers the LDS1 data groups and nothing else. EF.COM, EF.CardAccess,
+/// EF.CardSecurity, EF.DIR and EF.ATR/INFO are not data groups, and EF.SOD does
+/// not hash itself, so for all of them the absence of a hash says nothing about
+/// the document — it is what the format says should happen.
+fn covered_by_security_object(file: &FileRead) -> bool {
+    return types::DATA_GROUPS
+        .iter()
+        .any(|dg_info| dg_info.file_id == file.file_id && dg_info.in_lds1 && dg_info.dg_num > 0);
 }
 
 /// Whether a dumped path is a picture pulled out of a file, rather than the
@@ -948,5 +971,41 @@ mod tests {
         assert_eq!(row("Check digits"), Some("All 5 valid".to_string()));
         // The zone itself is not one of these rows; the caller adds it above them.
         assert_eq!(row("MRZ"), None);
+    }
+
+    /// EF.SOD hashes the LDS1 data groups and nothing else, so the files outside
+    /// it are not "unchecked" — there was never a check for them to have missed.
+    #[test]
+    fn does_not_claim_a_check_was_skipped_for_files_it_never_covers() {
+        let uncoverable = [
+            "EF.COM",
+            "EF.SOD",
+            "EF.CardAccess",
+            "EF.CardSecurity",
+            "EF.DIR",
+            "EF.ATR/INFO",
+        ];
+        for dg_info in types::DATA_GROUPS.iter() {
+            let file = FileRead {
+                name: dg_info.name,
+                description: dg_info.description,
+                file_id: dg_info.file_id,
+                data: Some(vec![]),
+                parsed: None,
+                hash: HashCheck::NotCovered,
+                dumped: vec![],
+            };
+            let expected = if uncoverable.contains(&dg_info.name) {
+                "notApplicable"
+            } else {
+                "notCovered"
+            };
+            assert_eq!(
+                super::file(&file).hash_status,
+                expected,
+                "{} reported the wrong hash status",
+                dg_info.name
+            );
+        }
     }
 }

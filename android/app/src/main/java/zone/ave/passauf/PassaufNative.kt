@@ -344,7 +344,13 @@ data class FileReport(
     val fileId: String,
     val present: Boolean,
     val size: Int,
-    /** noSecurityObject, notCovered, matches or mismatch. */
+    /**
+     * notApplicable, noSecurityObject, notCovered, matches or mismatch.
+     *
+     * notApplicable is a file EF.SOD could never cover — it hashes the LDS1 data
+     * groups and nothing else — as opposed to notCovered, which is a data group it
+     * could have recorded a hash for and did not.
+     */
     val hashStatus: String,
     val expectedHash: String? = null,
     val actualHash: String? = null,

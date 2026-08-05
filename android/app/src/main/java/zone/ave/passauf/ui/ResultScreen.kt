@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -741,8 +742,10 @@ private fun FileCard(
                 return@Column
             }
 
-            Spacer(Modifier.height(12.dp))
-            Text(hashStatusText(file), style = MaterialTheme.typography.bodySmall)
+            hashStatusText(file)?.let { status ->
+                Spacer(Modifier.height(12.dp))
+                Text(status, style = MaterialTheme.typography.bodySmall)
+            }
 
             val dumped = if (!filesOnDisk) {
                 emptyList()
@@ -869,6 +872,13 @@ private fun HashIcon(status: String) {
             contentDescription = "Does not match EF.SOD",
             tint = StatusColors.bad,
         )
+        // Not a question mark: nothing about this file is in question. EF.SOD hashes
+        // the data groups and none of these is one, so there is no result missing.
+        "notApplicable" -> Icon(
+            Icons.Default.Description,
+            contentDescription = "Not a file EF.SOD covers",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         else -> Icon(
             Icons.AutoMirrored.Filled.Help,
             contentDescription = "Not covered by EF.SOD",
@@ -877,9 +887,18 @@ private fun HashIcon(status: String) {
     }
 }
 
-private fun hashStatusText(file: FileReport): String = when (file.hashStatus) {
+/**
+ * What the hash check made of this file, or null when there was never one to make.
+ *
+ * EF.SOD covers the LDS1 data groups; EF.COM, EF.CardAccess, EF.CardSecurity, EF.DIR
+ * and EF.SOD itself are outside it by construction. Telling someone nothing was checked
+ * there reads as a check that went missing, and sends them looking for a fault that the
+ * format says should not exist.
+ */
+private fun hashStatusText(file: FileReport): String? = when (file.hashStatus) {
     "matches" -> "Matches its hash in EF.SOD."
     "mismatch" -> "Does NOT match EF.SOD.\nExpected ${file.expectedHash}\nGot      ${file.actualHash}"
+    "notApplicable" -> null
     "notCovered" -> "EF.SOD records no hash for this file, so nothing was checked."
     else -> "EF.SOD was not read, so nothing was checked."
 }
