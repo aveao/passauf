@@ -1033,6 +1033,32 @@ mod tests {
         ));
     }
 
+    /// The case from issue 16: MSE:Set AT goes through, then every GENERAL
+    /// AUTHENTICATE is answered 6C00. PACE has to give up so BAC can be tried, rather
+    /// than resending the first step forever.
+    #[test]
+    fn a_chip_that_always_answers_6c_ends_pace() {
+        let mut sent = 0;
+        let mut smartcard: Box<dyn Smartcard> = Box::new(
+            crate::smartcard_abstractions::CallbackSmartcard::new(|apdu: &[u8]| {
+                sent += 1;
+                return match apdu[1] {
+                    0x22 => Some(vec![0x90, 0x00]),
+                    _ => Some(vec![0x6C, 0x00]),
+                };
+            }),
+        );
+        let result = do_pace_authentication(
+            &mut smartcard,
+            &pace_info(0x02, 0x02, Some(13)),
+            &Password::Can("123456".to_string()),
+        );
+        drop(smartcard);
+        assert!(matches!(result, Err(PaceError::Protocol(_))));
+        // MSE:Set AT, then the first GENERAL AUTHENTICATE and its one resend.
+        assert_eq!(sent, 3);
+    }
+
     /// Selection skips what we cannot run and takes the first usable entry.
     #[test]
     fn selects_a_supported_variant() {

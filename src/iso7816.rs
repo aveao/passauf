@@ -314,6 +314,7 @@ impl ApduCommand {
         mut sm: Option<&mut SecureMessaging>,
     ) -> Result<(Vec<u8>, u16), ExchangeError> {
         let mut done_exchanging = false;
+        let mut resent_with_length = false;
         let mut rapdu_data: Vec<u8> = vec![];
         let mut status_code_bytes: Vec<u8> = vec![];
         while !done_exchanging {
@@ -350,13 +351,29 @@ impl ApduCommand {
             // If SW1 is set to '6C', then the process is aborted and before issuing
             // any other command, the same command may be re-issued using SW2
             // (exact number of available data bytes) as short Le field.
-            if status_code_bytes[0] == 0x6C {
+            //
+            // Once, that is. The card has named the exact length, so a second 6C
+            // means it will not answer this command at all, and asking again would
+            // go on forever. It goes back to the caller like any other refusal.
+            if status_code_bytes[0] == 0x6C && !resent_with_length {
                 debug!(
                     "Got a SW1=6C, re-requesting {:?} with Le={:?}",
                     self, status_code_bytes[1]
                 );
-                self.max_resp_len = u16::from(status_code_bytes[1]);
+                resent_with_length = true;
+                // A short Le of 0x00 means 256.
+                self.max_resp_len = match status_code_bytes[1] {
+                    0 => 256,
+                    length => u16::from(length),
+                };
             } else {
+                if status_code_bytes[0] == 0x6C {
+                    warn!(
+                        "The card answered 6C again after being given the length it asked for, \
+                         giving up on {:?}.",
+                        self
+                    );
+                }
                 done_exchanging = true;
             }
         }
@@ -745,6 +762,32 @@ mod tests {
             apdu_select_file_by_ef(0x011E).exchange(&mut card, false),
             Ok((vec![], 0x6A82))
         );
+    }
+
+    /// A card that keeps answering 6C gets one resend with the length it named, and
+    /// then its status back, rather than being asked forever.
+    #[test]
+    fn a_repeated_6c_is_resent_once() {
+        let mut card = fake_card(|_| Some(vec![0x6C, 0x00]));
+        let mut apdu = apdu_get_challenge();
+        assert_eq!(apdu.exchange(&mut card, false), Ok((vec![], 0x6C00)));
+        assert_eq!(card.sent, 2);
+        // 6C00 names 256 bytes, not "no Le".
+        assert_eq!(apdu.max_resp_len, 256);
+    }
+
+    /// The ordinary case: one 6C, then the answer.
+    #[test]
+    fn a_6c_is_resent_with_the_length_it_names() {
+        let mut card = fake_card(|apdu: &[u8]| match apdu.last() {
+            Some(0x04) => Some(vec![0xAA, 0xBB, 0xCC, 0xDD, 0x90, 0x00]),
+            _ => Some(vec![0x6C, 0x04]),
+        });
+        assert_eq!(
+            apdu_get_challenge().exchange(&mut card, false),
+            Ok((vec![0xAA, 0xBB, 0xCC, 0xDD], 0x9000))
+        );
+        assert_eq!(card.sent, 2);
     }
 
     /// A file the document does not have is not an error, and a document that stopped
