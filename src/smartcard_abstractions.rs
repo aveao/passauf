@@ -180,14 +180,16 @@ impl Smartcard for Proxmark14ASmartcard<'_> {
     fn exchange_command(&mut self, data: &Vec<u8>) -> Option<Vec<u8>> {
         let response =
             proxmark::exchange_command_14a(&mut self.interface.serial_port, data, 0).ok()?;
-        let response_without_hash = response.data[0..response.data.len() - 2].to_vec();
+        // A frame too short to carry its CRC carries nothing else either.
+        let response_without_hash = response.data[0..response.data.len().checked_sub(2)?].to_vec();
         return Some(response_without_hash);
     }
 
     fn exchange_apdu(&mut self, data: &Vec<u8>) -> Option<Vec<u8>> {
         let response =
             proxmark::exchange_apdu_14a(&mut self.interface.serial_port, data, false).ok()?;
-        let response_without_hash = response.data[0..response.data.len() - 2].to_vec();
+        // A frame too short to carry its CRC carries nothing else either.
+        let response_without_hash = response.data[0..response.data.len().checked_sub(2)?].to_vec();
         return Some(response_without_hash);
     }
 }
@@ -205,14 +207,16 @@ impl Smartcard for Proxmark14BSmartcard<'_> {
     fn exchange_command(&mut self, data: &Vec<u8>) -> Option<Vec<u8>> {
         let response =
             proxmark::exchange_command_14b(&mut self.interface.serial_port, data, 0, 0).ok()?;
-        let response_without_hash = response.data[0..response.data.len() - 2].to_vec();
+        // A frame too short to carry its CRC carries nothing else either.
+        let response_without_hash = response.data[0..response.data.len().checked_sub(2)?].to_vec();
         return Some(response_without_hash);
     }
 
     fn exchange_apdu(&mut self, data: &Vec<u8>) -> Option<Vec<u8>> {
         let response =
             proxmark::exchange_apdu_14b(&mut self.interface.serial_port, data, false).ok()?;
-        let response_without_hash = response.data[0..response.data.len() - 2].to_vec();
+        // A frame too short to carry its CRC carries nothing else either.
+        let response_without_hash = response.data[0..response.data.len().checked_sub(2)?].to_vec();
         return Some(response_without_hash);
     }
 }

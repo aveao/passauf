@@ -127,6 +127,22 @@ pub enum SessionError {
     PaceUnavailable,
     /// EF.COM did not come back, so there is no list of what to read.
     NoFileList,
+    /// The document stopped answering part way through, almost always because it
+    /// moved out of the reader's field. Worth trying again unchanged.
+    CardLost,
+    /// The document refused a step the read cannot go on without, with this status.
+    UnexpectedStatus(u16),
+}
+
+impl From<iso7816::ExchangeError> for SessionError {
+    fn from(error: iso7816::ExchangeError) -> Self {
+        return match error {
+            iso7816::ExchangeError::NoResponse => SessionError::CardLost,
+            iso7816::ExchangeError::UnexpectedStatus(status_code) => {
+                SessionError::UnexpectedStatus(status_code)
+            }
+        };
+    }
 }
 
 impl SessionError {
@@ -141,6 +157,8 @@ impl SessionError {
             SessionError::CanNeedsPace => "canNeedsPace",
             SessionError::PaceUnavailable => "paceUnavailable",
             SessionError::NoFileList => "noFileList",
+            SessionError::CardLost => "cardLost",
+            SessionError::UnexpectedStatus(_) => "unexpectedStatus",
         };
     }
 }
@@ -163,6 +181,16 @@ impl fmt::Display for SessionError {
             SessionError::NoFileList => write!(
                 f,
                 "Could not read EF.COM, so there is no list of the document's data groups."
+            ),
+            SessionError::CardLost => write!(
+                f,
+                "The document stopped responding part way through, most likely because it \
+                 moved out of the reader's field."
+            ),
+            SessionError::UnexpectedStatus(status_code) => write!(
+                f,
+                "The document refused a step the read cannot go on without (status {:04X}).",
+                status_code
             ),
         };
     }
@@ -361,7 +389,7 @@ where
         data_group(DataGroupEnum::EFCardAccess),
         options,
         None,
-    );
+    )?;
 
     // A document can carry EF.CardAccess without offering PACE in it, so this
     // has to come from the parsed SecurityInfos rather than from the file
@@ -410,7 +438,7 @@ where
             continue;
         }
         progress(Progress::ReadingFile(dg_info.name));
-        files.push(read_one_file(smartcard, dg_info, options, None));
+        files.push(read_one_file(smartcard, dg_info, options, None)?);
     }
 
     // Authenticate, preferring PACE when the document offers a variant we can
@@ -432,6 +460,8 @@ where
                     match crate::pace::do_pace_authentication(smartcard, &pace_info, &pace_password)
                     {
                         Ok((sm, pending)) => Some((sm, pending, algorithm)),
+                        // BAC would only find the same card not answering.
+                        Err(crate::pace::PaceError::Exchange(error)) => return Err(error.into()),
                         Err(error) => {
                             warn!("{}", error);
                             None
@@ -470,7 +500,7 @@ where
                     data_group(DataGroupEnum::EFCardSecurity),
                     options,
                     Some(&mut sm),
-                );
+                )?;
 
                 chip_authentication = match card_security.parsed {
                     Some(ParsedDataGroup::EFCardSecurity(ref parsed)) => {
@@ -495,8 +525,8 @@ where
 
             // Selecting the applet now happens over secure messaging.
             info!("Selecting eMRTD LDS1 applet");
-            let _ = iso7816::apdu_select_file_by_name(icao9303::AID_MRTD_LDS1.to_vec())
-                .secure_exchange(smartcard, true, Some(&mut sm));
+            let mut select = iso7816::apdu_select_file_by_name(icao9303::AID_MRTD_LDS1.to_vec());
+            select.secure_exchange(smartcard, true, Some(&mut sm))?;
             (sm, Authentication::Pace { algorithm })
         }
         None => {
@@ -516,14 +546,14 @@ where
             // BAC authenticates against the applet, so it has to be selected
             // first, and plainly.
             info!("Selecting eMRTD LDS1 applet");
-            let _ = iso7816::apdu_select_file_by_name(icao9303::AID_MRTD_LDS1.to_vec())
-                .exchange(smartcard, true);
+            let mut select = iso7816::apdu_select_file_by_name(icao9303::AID_MRTD_LDS1.to_vec());
+            select.exchange(smartcard, true)?;
             let sm = match icao9303::do_bac_authentication(
                 smartcard,
                 document_number,
                 date_of_birth,
                 date_of_expiry,
-            ) {
+            )? {
                 Some(sm) => sm,
                 // The document derived a different key from the one we did. It cannot
                 // say which of the three fields was wrong, only that the result did
@@ -547,7 +577,7 @@ where
         data_group(DataGroupEnum::EFCom),
         options,
         Some(&mut sm),
-    );
+    )?;
     let ef_com = match ef_com_read.parsed {
         Some(ParsedDataGroup::EFCom(ref ef_com)) => ef_com.clone(),
         _ => return Err(SessionError::NoFileList),
@@ -562,7 +592,7 @@ where
         data_group(DataGroupEnum::EFSod),
         options,
         Some(&mut sm),
-    );
+    )?;
     let security_object = match ef_sod_read.parsed {
         Some(ParsedDataGroup::EFSOD(ref security_object)) => Some(security_object.clone()),
         _ => {
@@ -615,7 +645,7 @@ where
         }
 
         progress(Progress::ReadingFile(dg_info.name));
-        let mut file = read_one_file(smartcard, dg_info, options, Some(&mut sm));
+        let mut file = read_one_file(smartcard, dg_info, options, Some(&mut sm))?;
 
         // Hash what was actually read and hold it against EF.SOD.
         if let (Some(ref security_object), Some(ref file_data)) = (&security_object, &file.data) {
@@ -851,16 +881,19 @@ fn data_group(file: DataGroupEnum) -> &'static types::DataGroup {
 }
 
 /// Select, read, parse and (if asked) dump one file.
+///
+/// A file the document does not have is a FileRead with no data. An error means the
+/// exchange failed, and the rest of the read would fail the same way.
 fn read_one_file<S>(
     smartcard: &mut Box<S>,
     dg_info: &'static types::DataGroup,
     options: &ReadOptions,
     sm: Option<&mut SecureMessaging>,
-) -> FileRead
+) -> Result<FileRead, iso7816::ExchangeError>
 where
     S: Smartcard + ?Sized,
 {
-    let data = iso7816::select_and_read_file(smartcard, dg_info, sm);
+    let data = iso7816::select_and_read_file(smartcard, dg_info, sm)?;
     let mut parsed = None;
     let mut dumped = vec![];
 
@@ -876,7 +909,7 @@ where
         }
     }
 
-    return FileRead {
+    return Ok(FileRead {
         name: dg_info.name,
         description: dg_info.description,
         file_id: dg_info.file_id,
@@ -884,7 +917,7 @@ where
         parsed,
         hash: HashCheck::NoSecurityObject,
         dumped,
-    };
+    });
 }
 
 /// Complete a PACE-CAM check against the keys a file offers.
@@ -1195,6 +1228,27 @@ mod tests {
             ChipAuthentication::NotAttempted.strongest(ChipAuthentication::NoKeyAvailable),
             ChipAuthentication::NoKeyAvailable
         );
+    }
+
+    /// A document that stops answering ends the read with an error a caller can act
+    /// on, instead of a panic only catch_unwind would stop.
+    #[test]
+    fn a_card_that_stops_answering_is_reported_as_lost() {
+        let mut smartcard: Box<dyn Smartcard> = Box::new(
+            crate::smartcard_abstractions::CallbackSmartcard::new(|_| None),
+        );
+        let options = ReadOptions {
+            access_key: AccessKey::Mrz {
+                document_number: "L898902C3".to_string(),
+                date_of_birth: "740812".to_string(),
+                date_of_expiry: "120415".to_string(),
+            },
+            ..Default::default()
+        };
+        assert!(matches!(
+            read_document(&mut smartcard, &options, &mut |_| {}),
+            Err(SessionError::CardLost)
+        ));
     }
 
     /// EF.COM is not covered by EF.SOD's signature, so a data group dropped

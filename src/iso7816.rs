@@ -99,6 +99,34 @@ pub enum StatusCode {
     Unknown = 0x6F00,
 }
 
+/// Why an exchange produced nothing a caller can act on.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExchangeError {
+    /// Nothing came back, or too little to hold a status word. Almost always the card
+    /// moving out of the reader's field.
+    NoResponse,
+    /// The caller asked for anything but 0x9000 to be an error, and the card answered
+    /// with this.
+    UnexpectedStatus(u16),
+}
+
+impl std::fmt::Display for ExchangeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        return match self {
+            ExchangeError::NoResponse => write!(
+                f,
+                "The card stopped responding mid-exchange, most likely because it moved out \
+                 of the reader's field."
+            ),
+            ExchangeError::UnexpectedStatus(status_code) => {
+                write!(f, "The card answered with status {:04X}.", status_code)
+            }
+        };
+    }
+}
+
+impl std::error::Error for ExchangeError {}
+
 #[derive(Debug)]
 pub struct ApduCommand {
     pub cla: u8,           // class
@@ -269,22 +297,22 @@ impl ApduCommand {
     pub fn exchange(
         &mut self,
         smartcard: &mut Box<impl Smartcard + ?Sized>,
-        assert_on_status: bool,
-    ) -> (Vec<u8>, u16) {
-        let (rapdu, status_code) = self.secure_exchange(smartcard, assert_on_status, None);
-        return (rapdu, status_code);
+        error_on_status: bool,
+    ) -> Result<(Vec<u8>, u16), ExchangeError> {
+        return self.secure_exchange(smartcard, error_on_status, None);
     }
 
     /// Send APDU to the given smartcard, using secure communications if a
     /// session is supplied
     ///
-    /// Returns (RAPDU, status code)
+    /// Returns (RAPDU, status code). With `error_on_status`, any status but
+    /// 0x9000 is returned as an error instead.
     pub fn secure_exchange(
         &mut self,
         smartcard: &mut Box<impl Smartcard + ?Sized>,
-        assert_on_status: bool,
+        error_on_status: bool,
         mut sm: Option<&mut SecureMessaging>,
-    ) -> (Vec<u8>, u16) {
+    ) -> Result<(Vec<u8>, u16), ExchangeError> {
         let mut done_exchanging = false;
         let mut rapdu_data: Vec<u8> = vec![];
         let mut status_code_bytes: Vec<u8> = vec![];
@@ -295,13 +323,12 @@ impl ApduCommand {
                 None => self.serialize(),
             };
 
-            // Nothing below this layer can carry on without a response, and a
-            // caller reading the message wants to know what actually happened,
-            // which is almost always the card leaving the field.
-            rapdu_data = smartcard.exchange_apdu(&apdu_bytes).expect(
-                "The card stopped responding mid-exchange, most likely because it moved out \
-                 of the reader's field.",
-            );
+            // Nothing below this layer can carry on without a response. Not every
+            // transport checks for the two status bytes, so that happens here too.
+            rapdu_data = match smartcard.exchange_apdu(&apdu_bytes) {
+                Some(rapdu_data) if rapdu_data.len() >= 2 => rapdu_data,
+                _ => return Err(ExchangeError::NoResponse),
+            };
             status_code_bytes = get_status_code_bytes(&rapdu_data);
 
             // - 2 bytes for status code
@@ -337,28 +364,33 @@ impl ApduCommand {
         // TODO: validate hash
         let status_code = u16::from_be_bytes(status_code_bytes.try_into().unwrap());
 
-        if assert_on_status {
-            // Intentionally not checking 61 here.
-            // One shouldn't use assert_on_status if you handle 61.
-            assert!(status_code == StatusCode::Ok as u16);
+        // Intentionally not checking 61 here.
+        // One shouldn't use error_on_status if you handle 61.
+        if error_on_status && status_code != StatusCode::Ok as u16 {
+            return Err(ExchangeError::UnexpectedStatus(status_code));
         }
 
-        return (rapdu_data, status_code);
+        return Ok((rapdu_data, status_code));
     }
 }
 
+/// Select a file and read all of it.
+///
+/// Returns Ok(None) when the document does not have the file or would not hand it
+/// over, which for most files is normal, and an error only when the exchange itself
+/// failed.
 pub fn select_and_read_file(
     smartcard: &mut Box<impl Smartcard + ?Sized>,
     dg_info: &types::DataGroup,
     mut sm: Option<&mut SecureMessaging>,
-) -> Option<Vec<u8>> {
+) -> Result<Option<Vec<u8>>, ExchangeError> {
     info!("<d>Selecting {} ({})</>", dg_info.name, dg_info.description);
     let mut apdu = apdu_select_file_by_ef(dg_info.file_id);
-    let (_, status_code) = apdu.secure_exchange(smartcard, false, sm.as_deref_mut());
+    let (_, status_code) = apdu.secure_exchange(smartcard, false, sm.as_deref_mut())?;
 
     if status_code != StatusCode::Ok as u16 {
         warn!("{} not found (this is probably fine).", dg_info.name);
-        return None;
+        return Ok(None);
     }
 
     info!("<d>Reading {} ({})</>", dg_info.name, dg_info.description);
@@ -380,7 +412,7 @@ pub fn select_and_read_file(
     let mut file_len: u16 = 0;
     while bytes_to_read > 0 {
         let mut apdu = apdu_read_binary(total_data.len() as u16, bytes_to_read);
-        let (apdu_data, status_code) = apdu.secure_exchange(smartcard, false, sm.as_deref_mut());
+        let (apdu_data, status_code) = apdu.secure_exchange(smartcard, false, sm.as_deref_mut())?;
         let status_code_bytes = status_code.to_be_bytes();
 
         // Unfortunately, ICAO 9303 does not allow us to read file sizes.
@@ -427,7 +459,7 @@ pub fn select_and_read_file(
             // if the read failed at some point, return None
             // TODO: this'd be a good spot to report status code text
             if status_code_bytes[0] != 0x90 {
-                return None;
+                return Ok(None);
             }
         }
 
@@ -443,11 +475,11 @@ pub fn select_and_read_file(
         total_data
     );
     // only return data if it's not empty.
-    return if total_data.is_empty() {
+    return Ok(if total_data.is_empty() {
         None
     } else {
         Some(total_data)
-    };
+    });
 }
 
 /// Parse a secure Response APDU
@@ -646,4 +678,92 @@ pub fn apdu_external_authentication(data: Vec<u8>) -> ApduCommand {
         // magic length from ICAO 9303 p11 (0x28)
         max_resp_len: 40,
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A card that answers every command through a closure, and counts them.
+    struct FakeCard<F: FnMut(&[u8]) -> Option<Vec<u8>>> {
+        answer: F,
+        sent: usize,
+    }
+
+    impl<F: FnMut(&[u8]) -> Option<Vec<u8>>> Drop for FakeCard<F> {
+        fn drop(&mut self) {}
+    }
+
+    impl<F: FnMut(&[u8]) -> Option<Vec<u8>>> Smartcard for FakeCard<F> {
+        fn exchange_command(&mut self, data: &Vec<u8>) -> Option<Vec<u8>> {
+            return self.exchange_apdu(data);
+        }
+
+        // Deliberately does not check the length, as PC/SC does not.
+        fn exchange_apdu(&mut self, data: &Vec<u8>) -> Option<Vec<u8>> {
+            self.sent += 1;
+            return (self.answer)(data);
+        }
+    }
+
+    fn fake_card<F: FnMut(&[u8]) -> Option<Vec<u8>>>(answer: F) -> Box<FakeCard<F>> {
+        return Box::new(FakeCard { answer, sent: 0 });
+    }
+
+    /// A card that has left the field is an error to hand back, not a panic.
+    #[test]
+    fn no_response_is_an_error() {
+        let mut card = fake_card(|_| None);
+        assert_eq!(
+            apdu_get_challenge().exchange(&mut card, false),
+            Err(ExchangeError::NoResponse)
+        );
+    }
+
+    /// One byte cannot hold a status word, and slicing two off it would underflow.
+    #[test]
+    fn a_response_without_a_status_word_is_an_error() {
+        for response in [vec![], vec![0x90]] {
+            let mut card = fake_card(move |_| Some(response.clone()));
+            assert_eq!(
+                apdu_get_challenge().exchange(&mut card, false),
+                Err(ExchangeError::NoResponse)
+            );
+        }
+    }
+
+    /// Asking for anything but 0x9000 to be an error makes it one, rather than an
+    /// assertion.
+    #[test]
+    fn error_on_status_returns_the_status() {
+        let mut card = fake_card(|_| Some(vec![0x6A, 0x82]));
+        assert_eq!(
+            apdu_select_file_by_ef(0x011E).exchange(&mut card, true),
+            Err(ExchangeError::UnexpectedStatus(0x6A82))
+        );
+        assert_eq!(
+            apdu_select_file_by_ef(0x011E).exchange(&mut card, false),
+            Ok((vec![], 0x6A82))
+        );
+    }
+
+    /// A file the document does not have is not an error, and a document that stopped
+    /// answering is.
+    #[test]
+    fn reading_tells_a_missing_file_from_a_missing_card() {
+        let dg_info = &types::DATA_GROUPS[0];
+
+        let mut card = fake_card(|_| Some(vec![0x6A, 0x82]));
+        assert_eq!(select_and_read_file(&mut card, dg_info, None), Ok(None));
+
+        // Selecting works, reading does not.
+        let mut card = fake_card(|apdu| match apdu[1] {
+            0xA4 => Some(vec![0x90, 0x00]),
+            _ => None,
+        });
+        assert_eq!(
+            select_and_read_file(&mut card, dg_info, None),
+            Err(ExchangeError::NoResponse)
+        );
+    }
 }

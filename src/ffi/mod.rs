@@ -137,9 +137,9 @@ pub extern "system" fn Java_zone_ave_passauf_PassaufNative_nativeReadDocument<'l
     let env_cell = RefCell::new(env);
 
     // A panic below this point would otherwise unwind straight through the JNI
-    // boundary, which is undefined behaviour. Plenty of the layers underneath
-    // assert rather than return, and a card leaving the field mid-read is
-    // exactly the sort of thing that trips them.
+    // boundary, which is undefined behaviour. A card leaving the field comes back
+    // as an error now, but plenty of the layers underneath still assert rather
+    // than return, and a chip answering something malformed can trip them.
     let outcome = catch_unwind(AssertUnwindSafe(|| {
         read(&env_cell, &transceiver, &progress, options)
     }));

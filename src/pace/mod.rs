@@ -53,6 +53,14 @@ pub enum PaceError {
     /// The chip's authentication token did not verify, which normally means
     /// the password was wrong.
     AuthenticationFailed,
+    /// An exchange with the chip failed outright, e.g. because it left the field.
+    Exchange(iso7816::ExchangeError),
+}
+
+impl From<iso7816::ExchangeError> for PaceError {
+    fn from(error: iso7816::ExchangeError) -> Self {
+        return PaceError::Exchange(error);
+    }
 }
 
 impl std::fmt::Display for PaceError {
@@ -67,6 +75,7 @@ impl std::fmt::Display for PaceError {
                 f,
                 "PACE authentication failed, the password is most likely wrong"
             ),
+            PaceError::Exchange(error) => write!(f, "PACE did not complete: {}", error),
         };
     }
 }
@@ -224,7 +233,7 @@ fn exchange_step_objects(
     is_last: bool,
 ) -> Result<HashMap<u16, Vec<u8>>, PaceError> {
     let mut apdu = iso7816::apdu_general_authenticate(request, is_last);
-    let (rapdu, status_code) = apdu.exchange(smartcard, false);
+    let (rapdu, status_code) = apdu.exchange(smartcard, false)?;
 
     if status_code != iso7816::StatusCode::Ok as u16 {
         // 0x6300 is the chip saying authentication failed, which for PACE means
@@ -411,7 +420,7 @@ pub fn do_pace_authentication(
         pace_password.reference(),
         Some(parameter_id),
     );
-    let (_, status_code) = apdu.exchange(smartcard, false);
+    let (_, status_code) = apdu.exchange(smartcard, false)?;
     if status_code != iso7816::StatusCode::Ok as u16 {
         return Err(PaceError::Protocol(format!(
             "MSE:Set AT returned status {:04X}, the chip likely does not offer {}",
@@ -1004,6 +1013,24 @@ mod tests {
             apdu.serialize(),
             hex("008600000C7C0A8508C2B0BD78D94BA86600")
         );
+    }
+
+    /// A chip that stops answering mid-PACE comes back as an exchange error, which
+    /// the session tells apart from a wrong password.
+    #[test]
+    fn a_chip_that_stops_answering_is_an_exchange_error() {
+        let mut smartcard: Box<dyn Smartcard> = Box::new(
+            crate::smartcard_abstractions::CallbackSmartcard::new(|_| None),
+        );
+        let result = do_pace_authentication(
+            &mut smartcard,
+            &pace_info(0x02, 0x02, Some(13)),
+            &Password::Can("123456".to_string()),
+        );
+        assert!(matches!(
+            result,
+            Err(PaceError::Exchange(iso7816::ExchangeError::NoResponse))
+        ));
     }
 
     /// Selection skips what we cannot run and takes the first usable entry.

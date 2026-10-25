@@ -249,7 +249,8 @@ data class DocumentReport(
     val error: String? = null,
     /**
      * A short, stable name for why a read failed: authentication, canNeedsPace,
-     * paceUnavailable, noFileList. Absent when it failed some other way.
+     * paceUnavailable, noFileList, cardLost, unexpectedStatus. Absent when it failed
+     * some other way.
      *
      * The sentence in [error] is for reading. This is for deciding what to offer, and
      * the two answers differ: wrong details and a document that slipped both read as
