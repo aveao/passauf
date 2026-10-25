@@ -290,6 +290,9 @@ private fun FailureCard(
         KeyKind.MRZ -> "document number, date of birth and date of expiry"
         KeyKind.CAN -> "CAN"
     }
+    // The app knows when the tag threw. passauf knows when the document stopped
+    // answering in some way the app never saw, and either one is worth another go.
+    val lost = tagLost || report.errorKind == "cardLost"
 
     Card(
         colors = CardDefaults.cardColors(
@@ -299,7 +302,7 @@ private fun FailureCard(
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
                 when {
-                    tagLost -> "The document moved away"
+                    lost -> "The document moved away"
                     report.errorKind == "authentication" -> "The document refused those details"
                     else -> "Could not read the document"
                 },
@@ -307,7 +310,7 @@ private fun FailureCard(
             )
 
             when {
-                tagLost -> {
+                lost -> {
                     Text(
                         "It stopped answering part way through. Reading takes a few seconds " +
                             "and the document has to stay against the phone for all of them.",
