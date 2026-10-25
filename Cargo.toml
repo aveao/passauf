@@ -1,6 +1,6 @@
 [package]
 name = "passauf"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 # Set by hayro-jpeg2000, which is the only dependency that asks for anything
 # recent. Declared so a too-old toolchain says so rather than failing somewhere
