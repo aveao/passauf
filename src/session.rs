@@ -68,6 +68,11 @@ pub struct ReadOptions {
     pub file_prefix: String,
     /// Have the parsers print what they found, which is the CLI's output.
     pub print: bool,
+    /// When the document offers PACE and PACE fails, stop with
+    /// [`SessionError::PaceFailed`] instead of falling back to BAC. Off by default,
+    /// since BAC is what a reader without PACE would do anyway; a caller that wants to
+    /// know a document refused PACE, rather than find it in the warnings, turns it on.
+    pub require_pace: bool,
 }
 
 impl Default for ReadOptions {
@@ -78,6 +83,7 @@ impl Default for ReadOptions {
             dump_path: None,
             file_prefix: "document".to_string(),
             print: false,
+            require_pace: false,
         };
     }
 }
@@ -132,6 +138,9 @@ pub enum SessionError {
     CardLost,
     /// The document refused a step the read cannot go on without, with this status.
     UnexpectedStatus(u16),
+    /// The document offers PACE, PACE failed, and [`ReadOptions::require_pace`] was set,
+    /// so BAC was not tried.
+    PaceFailed(String),
 }
 
 impl From<iso7816::ExchangeError> for SessionError {
@@ -159,6 +168,7 @@ impl SessionError {
             SessionError::NoFileList => "noFileList",
             SessionError::CardLost => "cardLost",
             SessionError::UnexpectedStatus(_) => "unexpectedStatus",
+            SessionError::PaceFailed(_) => "paceFailed",
         };
     }
 }
@@ -191,6 +201,11 @@ impl fmt::Display for SessionError {
                 f,
                 "The document refused a step the read cannot go on without (status {:04X}).",
                 status_code
+            ),
+            SessionError::PaceFailed(detail) => write!(
+                f,
+                "The document offers PACE and PACE failed, so the read stopped instead of                  falling back to BAC: {}",
+                detail
             ),
         };
     }
@@ -365,6 +380,28 @@ impl DocumentRead {
 ///
 /// `progress` is called as the read moves along, for a caller that wants to say
 /// what is happening; pass `&mut |_| {}` to ignore it.
+/// PACE was offered and did not work. With [`ReadOptions::require_pace`] the read stops
+/// here; otherwise it goes on with BAC, and the caller finds the reason among the warnings
+/// rather than only in the log, since the session it gets is not the one the document
+/// offered first.
+#[cfg(feature = "pace")]
+fn pace_failed<T>(
+    detail: String,
+    options: &ReadOptions,
+    warnings: &mut Vec<String>,
+) -> Result<Option<T>, SessionError> {
+    if options.require_pace {
+        return Err(SessionError::PaceFailed(detail));
+    }
+    let warning = format!(
+        "PACE failed ({}), so the session was set up with BAC instead.",
+        detail
+    );
+    warn!("{}", warning);
+    warnings.push(warning);
+    return Ok(None);
+}
+
 pub fn read_document<S>(
     smartcard: &mut Box<S>,
     options: &ReadOptions,
@@ -462,16 +499,10 @@ where
                         Ok((sm, pending)) => Some((sm, pending, algorithm)),
                         // BAC would only find the same card not answering.
                         Err(crate::pace::PaceError::Exchange(error)) => return Err(error.into()),
-                        Err(error) => {
-                            warn!("{}", error);
-                            None
-                        }
+                        Err(error) => pace_failed(error.to_string(), options, &mut warnings)?,
                     }
                 }
-                Err(error) => {
-                    warn!("{}", error);
-                    None
-                }
+                Err(error) => pace_failed(error.to_string(), options, &mut warnings)?,
             }
         }
         _ => None,
@@ -1072,6 +1103,93 @@ mod tests {
     use super::*;
     use crate::icao9303::DocumentHashAlgorithm;
     use crate::types::parsed_data_groups::DataGroupHash;
+
+    /// A card whose EF.CardAccess offers PACE (ECDH-GM, AES-128, P-256) and which refuses
+    /// MSE:Set AT with 6A80. Every other file is missing, and GET CHALLENGE, the first
+    /// step of BAC, is refused too, so a read can only end in an error. Returns the card
+    /// and a flag that says whether BAC was tried.
+    #[cfg(feature = "pace")]
+    fn card_refusing_pace() -> (Box<dyn Smartcard>, std::rc::Rc<std::cell::Cell<bool>>) {
+        const CARD_ACCESS: [u8; 22] = [
+            0x31, 0x14, 0x30, 0x12, 0x06, 0x0A, 0x04, 0x00, 0x7F, 0x00, 0x07, 0x02, 0x02, 0x04,
+            0x02, 0x02, 0x02, 0x01, 0x02, 0x02, 0x01, 0x0C,
+        ];
+        let bac_tried = std::rc::Rc::new(std::cell::Cell::new(false));
+        let flag = bac_tried.clone();
+        let mut selected_card_access = false;
+        let card = crate::smartcard_abstractions::CallbackSmartcard::new(move |apdu: &[u8]| {
+            let ok = [0x90, 0x00];
+            return Some(match apdu[1] {
+                // SELECT: by file ID only EF.CardAccess exists; the applet by name does.
+                0xA4 if apdu[2] == 0x02 && apdu.len() >= 7 => {
+                    selected_card_access = apdu[5..7] == [0x01, 0x1C];
+                    if selected_card_access {
+                        ok.to_vec()
+                    } else {
+                        vec![0x6A, 0x82]
+                    }
+                }
+                0xA4 => ok.to_vec(),
+                0xB0 if selected_card_access => {
+                    let offset = usize::from(u16::from_be_bytes([apdu[2], apdu[3]]));
+                    let wanted = match apdu.last() {
+                        Some(0) | None => 256,
+                        Some(n) => *n as usize,
+                    };
+                    let end = (offset + wanted).min(CARD_ACCESS.len());
+                    [&CARD_ACCESS[offset.min(end)..end], &ok[..]].concat()
+                }
+                0xB0 => vec![0x6A, 0x82],
+                // MSE:Set AT, the first step of PACE.
+                0x22 => vec![0x6A, 0x80],
+                // GET CHALLENGE, the first step of BAC.
+                0x84 => {
+                    flag.set(true);
+                    vec![0x69, 0x82]
+                }
+                _ => vec![0x6D, 0x00],
+            });
+        });
+        return (Box::new(card), bac_tried);
+    }
+
+    #[cfg(feature = "pace")]
+    fn mrz_options(require_pace: bool) -> ReadOptions {
+        return ReadOptions {
+            access_key: AccessKey::Mrz {
+                document_number: "L898902C3".to_string(),
+                date_of_birth: "740812".to_string(),
+                date_of_expiry: "120415".to_string(),
+            },
+            require_pace,
+            ..Default::default()
+        };
+    }
+
+    /// By default a refused PACE is followed by BAC, as before.
+    #[cfg(feature = "pace")]
+    #[test]
+    fn a_refused_pace_falls_back_to_bac_by_default() {
+        let (mut card, bac_tried) = card_refusing_pace();
+        let result = read_document(&mut card, &mrz_options(false), &mut |_| {});
+        assert!(result.is_err());
+        assert!(!matches!(result, Err(SessionError::PaceFailed(_))));
+        assert!(bac_tried.get(), "BAC was not tried after PACE failed");
+    }
+
+    /// With require_pace, a refused PACE ends the read, and BAC is never started.
+    #[cfg(feature = "pace")]
+    #[test]
+    fn a_refused_pace_stops_the_read_when_pace_is_required() {
+        let (mut card, bac_tried) = card_refusing_pace();
+        let result = read_document(&mut card, &mrz_options(true), &mut |_| {});
+        assert!(
+            matches!(result, Err(SessionError::PaceFailed(_))),
+            "expected PaceFailed, got {:?}",
+            result.err()
+        );
+        assert!(!bac_tried.get(), "BAC was tried although PACE was required");
+    }
 
     fn security_object(
         hash_algorithm: DocumentHashAlgorithm,

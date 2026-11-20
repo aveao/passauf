@@ -199,6 +199,7 @@ fn main() {
         read_binary_files: args.dump_path.is_some(),
         dump_path: args.dump_path.clone(),
         print: true,
+        require_pace: false,
     };
 
     // Connect to given reader
