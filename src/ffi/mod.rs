@@ -397,6 +397,7 @@ fn read<'local>(
         dump_path: options.dump_path.map(PathBuf::from),
         // Nothing here has a terminal to print to.
         print: false,
+        require_pace: false,
     };
 
     let mut smartcard: Box<dyn crate::smartcard_abstractions::Smartcard> =
