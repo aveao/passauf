@@ -189,8 +189,9 @@ impl fmt::Display for SessionError {
             ),
             SessionError::UnexpectedStatus(status_code) => write!(
                 f,
-                "The document refused a step the read cannot go on without (status {:04X}).",
-                status_code
+                "The document refused a step the read cannot go on without (status {:04X}, {}).",
+                status_code,
+                iso7816::status_text(*status_code)
             ),
         };
     }

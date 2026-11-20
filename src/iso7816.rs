@@ -118,9 +118,12 @@ impl std::fmt::Display for ExchangeError {
                 "The card stopped responding mid-exchange, most likely because it moved out \
                  of the reader's field."
             ),
-            ExchangeError::UnexpectedStatus(status_code) => {
-                write!(f, "The card answered with status {:04X}.", status_code)
-            }
+            ExchangeError::UnexpectedStatus(status_code) => write!(
+                f,
+                "The card answered with status {:04X} ({}).",
+                status_code,
+                status_text(*status_code)
+            ),
         };
     }
 }
@@ -474,8 +477,14 @@ pub fn select_and_read_file(
         } else {
             bytes_to_read = 0;
             // if the read failed at some point, return None
-            // TODO: this'd be a good spot to report status code text
             if status_code_bytes[0] != 0x90 {
+                let status_code = u16::from_be_bytes([status_code_bytes[0], status_code_bytes[1]]);
+                debug!(
+                    "Reading {} stopped with status {:04X} ({}).",
+                    dg_info.name,
+                    status_code,
+                    status_text(status_code)
+                );
                 return Ok(None);
             }
         }
@@ -564,6 +573,36 @@ pub fn parse_secure_rapdu(rapdu: &[u8], sm: &mut SecureMessaging) -> Option<Vec<
 pub const P1_SELECT_BY_EF: u8 = 0x02;
 pub const P1_SELECT_BY_NAME: u8 = 0x04;
 pub const P2_PROPRIETARY: u8 = 0x0C;
+
+/// What a status word means, in words, for messages a person reads.
+///
+/// Status words whose second byte is a parameter (61XX, 6CXX, 63CX in ISO/IEC 7816-4)
+/// are described with that parameter. Any other value is named from [`StatusCode`], and
+/// one that is not listed there is said to be unknown rather than guessed at.
+pub fn status_text(status_code: u16) -> String {
+    let [sw1, sw2] = status_code.to_be_bytes();
+    return match (sw1, sw2) {
+        (0x61, _) => format!("{} bytes still available", sw2),
+        (0x6C, _) => format!("wrong length, {} bytes available", sw2),
+        (0x63, 0xC0..=0xCF) => format!("verification failed, {} tries left", sw2 & 0x0F),
+        _ => match StatusCode::from_repr(status_code) {
+            Some(known) => words(known.into()),
+            None => "a status passauf does not know".to_string(),
+        },
+    };
+}
+
+/// "SecurityStatusNotSatisfied" to "security status not satisfied".
+fn words(name: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in name.chars().enumerate() {
+        if c.is_ascii_uppercase() && i > 0 {
+            out.push(' ');
+        }
+        out.push(c.to_ascii_lowercase());
+    }
+    return out;
+}
 
 pub fn get_status_code_bytes(data: &Vec<u8>) -> Vec<u8> {
     let status_code_start = data.len() - 2;
@@ -700,6 +739,34 @@ pub fn apdu_external_authentication(data: Vec<u8>) -> ApduCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn status_text_names_listed_status_words() {
+        assert_eq!(status_text(0x9000), "ok");
+        assert_eq!(status_text(0x6982), "security status not satisfied");
+        assert_eq!(status_text(0x6A80), "wrong data");
+        assert_eq!(status_text(0x6A86), "incorrect p1 p2");
+    }
+
+    #[test]
+    fn status_text_reads_the_parameter_byte() {
+        assert_eq!(status_text(0x6110), "16 bytes still available");
+        assert_eq!(status_text(0x6C00), "wrong length, 0 bytes available");
+        assert_eq!(status_text(0x63C2), "verification failed, 2 tries left");
+    }
+
+    #[test]
+    fn status_text_does_not_guess() {
+        assert_eq!(status_text(0x6FFF), "a status passauf does not know");
+    }
+
+    #[test]
+    fn unexpected_status_says_what_it_means() {
+        assert_eq!(
+            ExchangeError::UnexpectedStatus(0x6982).to_string(),
+            "The card answered with status 6982 (security status not satisfied)."
+        );
+    }
 
     /// A card that answers every command through a closure, and counts them.
     struct FakeCard<F: FnMut(&[u8]) -> Option<Vec<u8>>> {
